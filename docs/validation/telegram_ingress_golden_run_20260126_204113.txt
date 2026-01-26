@@ -1,0 +1,21 @@
+=== shogun telegram ingress golden run ===
+UTC: 2026-01-26T20:13:30+00:00
+
+=== containers (top 12) ===
+NAMES                STATUS                     CREATED
+shogun-core-stub     Up 3 minutes               3 minutes ago
+telegram-gateway     Up 10 minutes              10 minutes ago
+logstack-grafana-1   Up 8 days                  8 days ago
+logstack-alloy-1     Up 8 days                  8 days ago
+logstack-loki-1      Up 8 days                  8 days ago
+docker-events        Up 8 days                  8 days ago
+shogun-bot           Exited (0) 9 days ago      10 days ago
+mcp_postgres_core    Exited (137) 10 days ago   12 days ago
+focalboard           Exited (2) 10 days ago     5 months ago
+
+=== env (safe) ===
+ALLOWED_USER_IDS=204595710
+ALLOWED_GROUP_IDS=
+UPSTREAM_URL=http://upstream-stub:8080/telegram/events
+UPSTREAM_TIMEOUT_MS=30000
+TELEGRAM_MODE=polling
