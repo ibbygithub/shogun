@@ -1,0 +1,15 @@
+services:
+  telegram-gateway:
+    build: ./gateway
+    container_name: telegram-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - upstream-stub
+
+  upstream-stub:
+    build: ./upstream-stub
+    container_name: shogun-core-stub
+    restart: unless-stopped
+    # No ports needed; gateway talks over docker network
