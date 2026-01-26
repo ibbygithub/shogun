@@ -8,12 +8,12 @@ app.post("/telegram/events", (req, res) => {
   const env = req.body || {};
   const kind = env.kind || "unknown";
   const receipt = env.receipt_id || "no-receipt";
-  const text = env?.payload?.text || "";
+  const text = (env && env.payload && env.payload.text) ? String(env.payload.text) : "";
 
-  let reply_text = "âœ… upstream-stub got kind=" + kind + " receipt=" + receipt;
-  if (text) {
-    reply_text += ' text="' + String(text).slice(0, 80) + '"';
-  }
+  const reply_text =
+    "✅ upstream-stub got kind=" + kind +
+    " receipt=" + receipt +
+    (text ? ' text="' + text.slice(0, 80) + '"' : "");
 
   res.json({ reply_text });
 });
