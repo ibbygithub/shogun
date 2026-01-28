@@ -1,21 +1,19 @@
 const express = require("express");
+const bodyParser = require("body-parser");
+
 const app = express();
+app.use(bodyParser.json());
 
-app.use(express.json({ limit: "2mb" }));
+// ===== Tunables (DEBUG MODE) =====
+const MOVE_THRESHOLD_METERS = 20;   // 👈 lowered for testing
+const COOLDOWN_SECONDS = 10;        // 👈 lowered for testing
 
-// In-memory state (MVP only)
-const state = new Map();
+// ===== State (in-memory MVP) =====
+const lastByChat = new Map();
+// chatId → { lat, lon, ts, lastNotifyTs }
 
-// Tunables
-const MIN_DISTANCE_METERS = 100;
-const MIN_NOTIFY_INTERVAL_MS = 60 * 1000;
-
-function nowMs() {
-  return Date.now();
-}
-
-// Haversine distance in meters
-function distanceMeters(lat1, lon1, lat2, lon2) {
+// ===== Helpers =====
+function haversine(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = (d) => (d * Math.PI) / 180;
 
@@ -31,102 +29,87 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-app.get("/healthz", (_req, res) => res.status(200).send("ok"));
+function now() {
+  return Math.floor(Date.now() / 1000);
+}
 
-app.post("/telegram/events", (req, res) => {
-  const env = req.body || {};
-  const kind = env.kind || "unknown";
-  const receipt = env.receipt_id || "no-receipt";
-  const payload = env.payload || {};
-  const chatId = env.chat?.id || "unknown-chat";
+// ===== Endpoint =====
+app.post("/", (req, res) => {
+  const ev = req.body;
+  const chatId = ev?.chat?.id;
 
-  // Always log the event (so you can prove updates are arriving)
-  console.log(
-    `[event] kind=${kind} receipt=${receipt} chat=${chatId}` +
-      (payload.location
-        ? ` lat=${payload.location.latitude} lon=${payload.location.longitude}`
-        : "") +
-      (payload.caption
-        ? ` caption="${String(payload.caption).slice(0, 40)}"`
-        : "") +
-      (payload.text
-        ? ` text="${String(payload.text).slice(0, 40)}"`
-        : "")
-  );
-
-  // TEXT
-  if (kind === "text" && payload.text) {
-    return res.json({
-      reply_text: `✅ upstream-stub got kind=text receipt=${receipt} text="${String(
-        payload.text
-      ).slice(0, 80)}"`,
-    });
-  }
-
-  // PHOTO
-  if (kind === "photo") {
-    const caption = payload.caption
-      ? ` caption="${String(payload.caption).slice(0, 80)}"`
-      : "";
-    const count = Array.isArray(payload.photos)
-      ? ` photos=${payload.photos.length}`
-      : "";
-    return res.json({
-      reply_text: `✅ upstream-stub got kind=photo receipt=${receipt}${caption}${count}`,
-    });
-  }
-
-  // VOICE
-  if (kind === "voice" && payload.voice?.duration) {
-    return res.json({
-      reply_text: `✅ upstream-stub got kind=voice receipt=${receipt} duration=${payload.voice.duration}s`,
-    });
-  }
-
-  // LOCATION (notify ONLY on trigger)
-  if (kind === "location" && payload.location) {
-    const { latitude, longitude } = payload.location;
-    const ts = nowMs();
-
-    const prev = state.get(chatId);
-
-    if (!prev) {
-      state.set(chatId, {
-        lat: latitude,
-        lon: longitude,
-        lastNotified: 0,
-      });
-      // No reply_text -> gateway will not send any Telegram message.
-      return res.json({});
-    }
-
-    const moved = distanceMeters(prev.lat, prev.lon, latitude, longitude);
-    const sinceLastMs = ts - prev.lastNotified;
-
-    const shouldNotify =
-      moved >= MIN_DISTANCE_METERS && sinceLastMs >= MIN_NOTIFY_INTERVAL_MS;
-
-    state.set(chatId, {
-      lat: latitude,
-      lon: longitude,
-      lastNotified: shouldNotify ? ts : prev.lastNotified,
-    });
-
-    if (shouldNotify) {
-      return res.json({
-        reply_text: `🚶 You moved ~${Math.round(
-          moved
-        )}m. Want food, coffee, or water?`,
-      });
-    }
-
+  if (!chatId) {
+    console.log("[drop] missing chat id");
     return res.json({});
   }
 
-  // DEFAULT
+  console.log(
+    `[event] kind=${ev.kind} receipt=${ev.receipt_id} chat=${chatId}`,
+    ev.payload?.location
+      ? `lat=${ev.payload.location.latitude} lon=${ev.payload.location.longitude}`
+      : ""
+  );
+
+  // Only act on location events
+  if (ev.kind !== "location" || !ev.payload?.location) {
+    return res.json({});
+  }
+
+  const lat = ev.payload.location.latitude;
+  const lon = ev.payload.location.longitude;
+  const ts = now();
+
+  const prev = lastByChat.get(chatId);
+
+  if (!prev) {
+    lastByChat.set(chatId, {
+      lat,
+      lon,
+      ts,
+      lastNotifyTs: 0,
+    });
+
+    return res.json({
+      reply_text: `📍 Location tracking started\nlat=${lat}\nlon=${lon}`,
+    });
+  }
+
+  const moved = haversine(prev.lat, prev.lon, lat, lon);
+  const sinceLast = ts - prev.ts;
+  const sinceNotify = ts - prev.lastNotifyTs;
+
+  const shouldNotify =
+    moved >= MOVE_THRESHOLD_METERS &&
+    sinceNotify >= COOLDOWN_SECONDS;
+
+  console.log(
+    `[eval] chat=${chatId} moved=${moved.toFixed(
+      1
+    )}m sinceLast=${sinceLast}s sinceNotify=${sinceNotify}s notify=${shouldNotify}`
+  );
+
+  // Update baseline every time
+  prev.lat = lat;
+  prev.lon = lon;
+  prev.ts = ts;
+
+  if (!shouldNotify) {
+    lastByChat.set(chatId, prev);
+    return res.json({});
+  }
+
+  prev.lastNotifyTs = ts;
+  lastByChat.set(chatId, prev);
+
   return res.json({
-    reply_text: `✅ upstream-stub got kind=${kind} receipt=${receipt}`,
+    reply_text: `📍 Trigger fired\nmoved=${moved.toFixed(
+      1
+    )}m\nsinceLast=${sinceLast}s\nthreshold=${MOVE_THRESHOLD_METERS}m`,
   });
 });
 
-app.listen(8080, () => console.log("upstream-stub listening on :8080"));
+// ===== Boot =====
+const PORT = 8080;
+app.listen(PORT, () => {
+  console.log(`upstream-stub listening on :${PORT}`);
+});
