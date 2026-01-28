@@ -1,5 +1,3 @@
-// LIVE-LOCATION-FIX: edited_message.location forwarded as kind=location (proof line)
-
 const { Telegraf } = require("telegraf");
 const axios = require("axios");
 const crypto = require("crypto");
@@ -9,18 +7,15 @@ const BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const UPSTREAM_URL = (process.env.UPSTREAM_URL || "").trim();
 const TIMEOUT_MS = parseInt(process.env.UPSTREAM_TIMEOUT_MS || "30000", 10);
 
-// Ingress slider (default polling)
 const TELEGRAM_MODE = (process.env.TELEGRAM_MODE || "polling").trim().toLowerCase();
 
-// Webhook settings (only used if TELEGRAM_MODE=webhook later)
-const WEBHOOK_DOMAIN = (process.env.WEBHOOK_DOMAIN || "").trim();
-const WEBHOOK_PATH = (process.env.WEBHOOK_PATH || "/telegram/webhook").trim();
-const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || "3000", 10);
-
-// Capability flags
-const CAP_CAN_SEARCH = (process.env.CAP_CAN_SEARCH || "false").trim().toLowerCase() === "true";
-const CAP_CAN_SCRAPE = (process.env.CAP_CAN_SCRAPE || "false").trim().toLowerCase() === "true";
-const CAP_CAN_FETCH_FILES = (process.env.CAP_CAN_FETCH_FILES || "false").trim().toLowerCase() === "true";
+// Capability flags (forwarded for policy decisions upstream)
+const CAP_CAN_SEARCH =
+  (process.env.CAP_CAN_SEARCH || "false").trim().toLowerCase() === "true";
+const CAP_CAN_SCRAPE =
+  (process.env.CAP_CAN_SCRAPE || "false").trim().toLowerCase() === "true";
+const CAP_CAN_FETCH_FILES =
+  (process.env.CAP_CAN_FETCH_FILES || "false").trim().toLowerCase() === "true";
 
 // Allow lists
 const ALLOWED_USER_IDS = (process.env.ALLOWED_USER_IDS || "")
@@ -46,15 +41,10 @@ if (ALLOWED_USER_IDS.length === 0) {
   console.error("FATAL: ALLOWED_USER_IDS empty");
   process.exit(1);
 }
-if (TELEGRAM_MODE === "webhook") {
-  if (!WEBHOOK_DOMAIN) {
-    console.error("FATAL: TELEGRAM_MODE=webhook requires WEBHOOK_DOMAIN");
-    process.exit(1);
-  }
-  if (!WEBHOOK_PATH.startsWith("/")) {
-    console.error("FATAL: WEBHOOK_PATH must start with '/'");
-    process.exit(1);
-  }
+if (TELEGRAM_MODE !== "polling") {
+  console.warn(
+    `WARN: TELEGRAM_MODE=${TELEGRAM_MODE} set, but this gateway is running polling-only MVP.`
+  );
 }
 
 // ===== Helpers =====
@@ -69,21 +59,25 @@ function clip(s, n = 3500) {
   return str.length > n ? str.slice(0, n) : str;
 }
 
-function isAllowed(ctx) {
-  const userId = ctx.from?.id ? String(ctx.from.id) : null;
-  const chatId = ctx.chat?.id ? String(ctx.chat.id) : null;
-  const chatType = ctx.chat?.type;
+function isAllowedByParts({ from, chat }) {
+  const userId = from?.id ? String(from.id) : null;
+  const chatId = chat?.id ? String(chat.id) : null;
+  const chatType = chat?.type;
 
   const userOk = userId && ALLOWED_USER_IDS.includes(userId);
 
-  if (chatType === "private") return userOk;
+  if (chatType === "private") return !!userOk;
 
   if (chatType === "group" || chatType === "supergroup") {
     const groupOk = chatId && ALLOWED_GROUP_IDS.includes(chatId);
-    return userOk && groupOk;
+    return !!(userOk && groupOk);
   }
 
   return false;
+}
+
+function isAllowedCtx(ctx) {
+  return isAllowedByParts({ from: ctx.from, chat: ctx.chat });
 }
 
 async function forward(envelope) {
@@ -94,7 +88,7 @@ async function forward(envelope) {
   return resp.data;
 }
 
-function baseEnvelope(ctx, kind) {
+function baseEnvelopeFromCtx(ctx, kind) {
   return {
     receipt_id: mkId(),
     received_at: nowIso(),
@@ -126,17 +120,6 @@ function baseEnvelope(ctx, kind) {
   };
 }
 
-async function replyOrAck(ctx, receiptId, upstream) {
-  const reply = upstream?.reply_text;
-  if (reply) return ctx.reply(clip(reply));
-  return ctx.reply(`✅ Received. Receipt: ${receiptId}`);
-}
-
-async function replyUpstreamDown(ctx, receiptId) {
-  return ctx.reply(`⚠️ Upstream unavailable. Receipt: ${receiptId}`);
-}
-
-// ===== Payload builders =====
 function locationPayloadFromLoc(loc) {
   return loc
     ? {
@@ -150,10 +133,6 @@ function locationPayloadFromLoc(loc) {
         },
       }
     : { location: null };
-}
-
-function locationPayload(msg) {
-  return locationPayloadFromLoc(msg?.location);
 }
 
 function photoPayload(msg) {
@@ -201,35 +180,18 @@ function voicePayload(msg) {
   };
 }
 
-function audioPayload(msg) {
-  const a = msg?.audio;
-  return {
-    audio: a
-      ? {
-          file_id: a.file_id,
-          file_unique_id: a.file_unique_id,
-          duration: a.duration,
-          performer: a.performer,
-          title: a.title,
-          mime_type: a.mime_type,
-          file_size: a.file_size,
-        }
-      : null,
-  };
-}
-
 // ===== Bot =====
 const bot = new Telegraf(BOT_TOKEN);
 
 bot.command("status", async (ctx) => {
-  if (!isAllowed(ctx)) return;
-  await ctx.reply("✅ gateway alive; mode=" + TELEGRAM_MODE);
+  if (!isAllowedCtx(ctx)) return;
+  await ctx.reply("✅ gateway alive; mode=polling");
 });
 
 bot.on("text", async (ctx) => {
-  if (!isAllowed(ctx)) return;
+  if (!isAllowedCtx(ctx)) return;
 
-  const env = baseEnvelope(ctx, "text");
+  const env = baseEnvelopeFromCtx(ctx, "text");
   env.payload = {
     text: ctx.message?.text || "",
     entities: ctx.message?.entities || [],
@@ -237,101 +199,86 @@ bot.on("text", async (ctx) => {
 
   try {
     const upstream = await forward(env);
-    await replyOrAck(ctx, env.receipt_id, upstream);
+    if (upstream?.reply_text) return ctx.reply(clip(upstream.reply_text));
+    return ctx.reply(`✅ Received. Receipt: ${env.receipt_id}`);
   } catch {
-    await replyUpstreamDown(ctx, env.receipt_id);
+    return ctx.reply(`⚠️ Upstream unavailable. Receipt: ${env.receipt_id}`);
   }
 });
 
 bot.on("location", async (ctx) => {
-  if (!isAllowed(ctx)) return;
+  if (!isAllowedCtx(ctx)) return;
 
-  const env = baseEnvelope(ctx, "location");
-  env.payload = locationPayload(ctx.message);
+  const env = baseEnvelopeFromCtx(ctx, "location");
+  env.payload = locationPayloadFromLoc(ctx.message?.location);
 
   try {
     const upstream = await forward(env);
-    await replyOrAck(ctx, env.receipt_id, upstream);
+    if (upstream?.reply_text) return ctx.reply(clip(upstream.reply_text));
+    return ctx.reply(`✅ Location received. Receipt: ${env.receipt_id}`);
   } catch {
-    await ctx.reply(`✅ Location received. Receipt: ${env.receipt_id}`);
+    return ctx.reply(`✅ Location received. Receipt: ${env.receipt_id}`);
   }
 });
 
 bot.on("photo", async (ctx) => {
-  if (!isAllowed(ctx)) return;
+  if (!isAllowedCtx(ctx)) return;
 
-  const env = baseEnvelope(ctx, "photo");
+  const env = baseEnvelopeFromCtx(ctx, "photo");
   env.payload = photoPayload(ctx.message);
 
   try {
     const upstream = await forward(env);
-    await replyOrAck(ctx, env.receipt_id, upstream);
+    if (upstream?.reply_text) return ctx.reply(clip(upstream.reply_text));
+    return ctx.reply(`✅ Photo received. Receipt: ${env.receipt_id}`);
   } catch {
-    await ctx.reply(`✅ Photo received. Receipt: ${env.receipt_id}`);
+    return ctx.reply(`✅ Photo received. Receipt: ${env.receipt_id}`);
   }
 });
 
 bot.on("document", async (ctx) => {
-  if (!isAllowed(ctx)) return;
+  if (!isAllowedCtx(ctx)) return;
 
-  const env = baseEnvelope(ctx, "document");
+  const env = baseEnvelopeFromCtx(ctx, "document");
   env.payload = documentPayload(ctx.message);
 
   try {
     const upstream = await forward(env);
-    await replyOrAck(ctx, env.receipt_id, upstream);
+    if (upstream?.reply_text) return ctx.reply(clip(upstream.reply_text));
+    return ctx.reply(`✅ Document received. Receipt: ${env.receipt_id}`);
   } catch {
-    await ctx.reply(`✅ Document received. Receipt: ${env.receipt_id}`);
+    return ctx.reply(`✅ Document received. Receipt: ${env.receipt_id}`);
   }
 });
 
 bot.on("voice", async (ctx) => {
-  if (!isAllowed(ctx)) return;
+  if (!isAllowedCtx(ctx)) return;
 
-  const env = baseEnvelope(ctx, "voice");
+  const env = baseEnvelopeFromCtx(ctx, "voice");
   env.payload = voicePayload(ctx.message);
 
   try {
     const upstream = await forward(env);
-    await replyOrAck(ctx, env.receipt_id, upstream);
+    if (upstream?.reply_text) return ctx.reply(clip(upstream.reply_text));
+    return ctx.reply(`✅ Voice received. Receipt: ${env.receipt_id}`);
   } catch {
-    await ctx.reply(`✅ Voice received. Receipt: ${env.receipt_id}`);
+    return ctx.reply(`✅ Voice received. Receipt: ${env.receipt_id}`);
   }
 });
 
-bot.on("audio", async (ctx) => {
-  if (!isAllowed(ctx)) return;
-
-  const env = baseEnvelope(ctx, "audio");
-  env.payload = audioPayload(ctx.message);
-
-  try {
-    const upstream = await forward(env);
-    await replyOrAck(ctx, env.receipt_id, upstream);
-  } catch {
-    await ctx.reply(`✅ Audio received. Receipt: ${env.receipt_id}`);
-  }
-});
-
-// ✅ KEY FIX: Live location updates arrive as edited_message with edited.location
+/**
+ * Live location updates arrive as edited_message updates (message edited in place).
+ * We forward edited_message.location as kind=location.
+ *
+ * IMPORTANT: we DO NOT reply on each edit (spam).
+ * We ONLY send a Telegram message if upstream returns reply_text (trigger fired).
+ */
 bot.on("edited_message", async (ctx) => {
   const edited = ctx.update?.edited_message;
   if (!edited) return;
 
-  // allow check (private + group)
-  const userId = edited.from?.id ? String(edited.from.id) : null;
-  const chatIdStr = edited.chat?.id ? String(edited.chat.id) : null;
-  const chatType = edited.chat?.type;
+  if (!isAllowedByParts({ from: edited.from, chat: edited.chat })) return;
 
-  const userOk = userId && ALLOWED_USER_IDS.includes(userId);
-  if (!userOk) return;
-
-  if (chatType === "group" || chatType === "supergroup") {
-    const groupOk = chatIdStr && ALLOWED_GROUP_IDS.includes(chatIdStr);
-    if (!groupOk) return;
-  }
-
-  // If edited message contains a location, forward it as kind=location
   if (edited.location) {
     const env = {
       receipt_id: mkId(),
@@ -364,23 +311,25 @@ bot.on("edited_message", async (ctx) => {
     };
 
     try {
-      await forward(env);
+      const upstream = await forward(env);
+
+      // Only notify if upstream explicitly asked us to
+      if (upstream?.reply_text && edited.chat?.id) {
+        await bot.telegram.sendMessage(
+          edited.chat.id,
+          clip(upstream.reply_text)
+        );
+      }
     } catch {
-      // silent
+      // silent for edited updates
     }
   }
 });
 
+// Launch
 async function start() {
-  if (TELEGRAM_MODE === "webhook") {
-    console.log("Starting in webhook mode");
-    await bot.launch({
-      webhook: { domain: WEBHOOK_DOMAIN, hookPath: WEBHOOK_PATH, port: WEBHOOK_PORT },
-    });
-  } else {
-    console.log("Starting in polling mode");
-    await bot.launch();
-  }
+  console.log("Starting in polling mode");
+  await bot.launch();
   console.log("gateway ready");
 }
 
