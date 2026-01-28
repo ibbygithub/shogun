@@ -4,16 +4,16 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 /**
- * In-memory state (MVP-safe)
- * Keyed by chat_id to avoid cross-chat bleed
+ * In-memory state (MVP only)
+ * Keyed by chat_id
  */
 const state = new Map();
 
-// Tunables (MVP defaults)
+// Tunables
 const MIN_DISTANCE_METERS = 100;
 const MIN_NOTIFY_INTERVAL_MS = 60 * 1000;
 
-function now() {
+function nowMs() {
   return Date.now();
 }
 
@@ -45,13 +45,27 @@ app.post("/telegram/events", (req, res) => {
   const payload = env.payload || {};
   const chatId = env.chat?.id || "unknown-chat";
 
-  let reply_text =
-    "✅ upstream-stub got kind=" + kind + " receipt=" + receipt;
+  // 🔍 ALWAYS LOG THE EVENT (THIS IS THE KEY FIX)
+  console.log(
+    `[event] kind=${kind} receipt=${receipt} chat=${chatId}` +
+      (payload.location
+        ? ` lat=${payload.location.latitude} lon=${payload.location.longitude}`
+        : "") +
+      (payload.caption
+        ? ` caption="${String(payload.caption).slice(0, 40)}"`
+        : "") +
+      (payload.text
+        ? ` text="${String(payload.text).slice(0, 40)}"`
+        : "")
+  );
 
   // ----- TEXT -----
   if (kind === "text" && payload.text) {
-    reply_text += ` text="${String(payload.text).slice(0, 80)}"`;
-    return res.json({ reply_text });
+    return res.json({
+      reply_text:
+        `✅ upstream-stub got kind=text receipt=${receipt} ` +
+        `text="${String(payload.text).slice(0, 80)}"`,
+    });
   }
 
   // ----- PHOTO -----
@@ -62,33 +76,42 @@ app.post("/telegram/events", (req, res) => {
     const count = Array.isArray(payload.photos)
       ? ` photos=${payload.photos.length}`
       : "";
-    reply_text += caption + count;
-    return res.json({ reply_text });
+    return res.json({
+      reply_text:
+        `✅ upstream-stub got kind=photo receipt=${receipt}` +
+        caption +
+        count,
+    });
   }
 
   // ----- VOICE -----
   if (kind === "voice" && payload.voice?.duration) {
-    reply_text += ` duration=${payload.voice.duration}s`;
-    return res.json({ reply_text });
+    return res.json({
+      reply_text:
+        `✅ upstream-stub got kind=voice receipt=${receipt} ` +
+        `duration=${payload.voice.duration}s`,
+    });
   }
 
-  // ----- LOCATION (THIS IS THE NEW SHOGUN LOGIC) -----
+  // ----- LOCATION (DEBUG MODE – NO SILENT FAILS) -----
   if (kind === "location" && payload.location) {
     const { latitude, longitude } = payload.location;
-    const ts = now();
+    const ts = nowMs();
 
     const prev = state.get(chatId);
 
     if (!prev) {
-      // First location: store, but don't notify
       state.set(chatId, {
         lat: latitude,
         lon: longitude,
         lastNotified: 0,
       });
 
-      reply_text += ` lat=${latitude} lon=${longitude}`;
-      return res.json({ reply_text });
+      return res.json({
+        reply_text:
+          `📍 First location stored. ` +
+          `lat=${latitude} lon=${longitude}`,
+      });
     }
 
     const moved = distanceMeters(
@@ -98,38 +121,40 @@ app.post("/telegram/events", (req, res) => {
       longitude
     );
 
-    const sinceLast = ts - prev.lastNotified;
-
-    if (
+    const sinceLastMs = ts - prev.lastNotified;
+    const shouldNotify =
       moved >= MIN_DISTANCE_METERS &&
-      sinceLast >= MIN_NOTIFY_INTERVAL_MS
-    ) {
-      state.set(chatId, {
-        lat: latitude,
-        lon: longitude,
-        lastNotified: ts,
-      });
+      sinceLastMs >= MIN_NOTIFY_INTERVAL_MS;
 
-      return res.json({
-        reply_text: `🚶 You moved ~${Math.round(
-          moved
-        )}m. Want food, coffee, or water?`,
-      });
-    }
-
-    // Update location silently
     state.set(chatId, {
       lat: latitude,
       lon: longitude,
-      lastNotified: prev.lastNotified,
+      lastNotified: shouldNotify ? ts : prev.lastNotified,
     });
 
-    reply_text += ` lat=${latitude} lon=${longitude}`;
-    return res.json({ reply_text });
+    if (shouldNotify) {
+      return res.json({
+        reply_text:
+          `🚶 Triggered: moved=${Math.round(moved)}m ` +
+          `sinceLast=${Math.round(sinceLastMs / 1000)}s`,
+      });
+    }
+
+    // ALWAYS respond with debug info so you know what's happening
+    return res.json({
+      reply_text:
+        `📍 Update: moved=${Math.round(moved)}m ` +
+        `sinceLast=${Math.round(sinceLastMs / 1000)}s ` +
+        `(need ${MIN_DISTANCE_METERS}m & ` +
+        `${MIN_NOTIFY_INTERVAL_MS / 1000}s)`,
+    });
   }
 
   // ----- DEFAULT -----
-  return res.json({ reply_text });
+  return res.json({
+    reply_text:
+      `✅ upstream-stub got kind=${kind} receipt=${receipt}`,
+  });
 });
 
 app.listen(8080, () =>
