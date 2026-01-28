@@ -3,10 +3,7 @@ const app = express();
 
 app.use(express.json({ limit: "2mb" }));
 
-/**
- * In-memory state (MVP only)
- * Keyed by chat_id
- */
+// In-memory state (MVP only)
 const state = new Map();
 
 // Tunables
@@ -17,9 +14,7 @@ function nowMs() {
   return Date.now();
 }
 
-/**
- * Haversine distance in meters
- */
+// Haversine distance in meters
 function distanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -45,7 +40,7 @@ app.post("/telegram/events", (req, res) => {
   const payload = env.payload || {};
   const chatId = env.chat?.id || "unknown-chat";
 
-  // 🔍 ALWAYS LOG THE EVENT (THIS IS THE KEY FIX)
+  // Always log the event (so you can prove updates are arriving)
   console.log(
     `[event] kind=${kind} receipt=${receipt} chat=${chatId}` +
       (payload.location
@@ -59,16 +54,16 @@ app.post("/telegram/events", (req, res) => {
         : "")
   );
 
-  // ----- TEXT -----
+  // TEXT
   if (kind === "text" && payload.text) {
     return res.json({
-      reply_text:
-        `✅ upstream-stub got kind=text receipt=${receipt} ` +
-        `text="${String(payload.text).slice(0, 80)}"`,
+      reply_text: `✅ upstream-stub got kind=text receipt=${receipt} text="${String(
+        payload.text
+      ).slice(0, 80)}"`,
     });
   }
 
-  // ----- PHOTO -----
+  // PHOTO
   if (kind === "photo") {
     const caption = payload.caption
       ? ` caption="${String(payload.caption).slice(0, 80)}"`
@@ -77,23 +72,18 @@ app.post("/telegram/events", (req, res) => {
       ? ` photos=${payload.photos.length}`
       : "";
     return res.json({
-      reply_text:
-        `✅ upstream-stub got kind=photo receipt=${receipt}` +
-        caption +
-        count,
+      reply_text: `✅ upstream-stub got kind=photo receipt=${receipt}${caption}${count}`,
     });
   }
 
-  // ----- VOICE -----
+  // VOICE
   if (kind === "voice" && payload.voice?.duration) {
     return res.json({
-      reply_text:
-        `✅ upstream-stub got kind=voice receipt=${receipt} ` +
-        `duration=${payload.voice.duration}s`,
+      reply_text: `✅ upstream-stub got kind=voice receipt=${receipt} duration=${payload.voice.duration}s`,
     });
   }
 
-  // ----- LOCATION (DEBUG MODE – NO SILENT FAILS) -----
+  // LOCATION (notify ONLY on trigger)
   if (kind === "location" && payload.location) {
     const { latitude, longitude } = payload.location;
     const ts = nowMs();
@@ -106,25 +96,15 @@ app.post("/telegram/events", (req, res) => {
         lon: longitude,
         lastNotified: 0,
       });
-
-      return res.json({
-        reply_text:
-          `📍 First location stored. ` +
-          `lat=${latitude} lon=${longitude}`,
-      });
+      // No reply_text -> gateway will not send any Telegram message.
+      return res.json({});
     }
 
-    const moved = distanceMeters(
-      prev.lat,
-      prev.lon,
-      latitude,
-      longitude
-    );
-
+    const moved = distanceMeters(prev.lat, prev.lon, latitude, longitude);
     const sinceLastMs = ts - prev.lastNotified;
+
     const shouldNotify =
-      moved >= MIN_DISTANCE_METERS &&
-      sinceLastMs >= MIN_NOTIFY_INTERVAL_MS;
+      moved >= MIN_DISTANCE_METERS && sinceLastMs >= MIN_NOTIFY_INTERVAL_MS;
 
     state.set(chatId, {
       lat: latitude,
@@ -134,29 +114,19 @@ app.post("/telegram/events", (req, res) => {
 
     if (shouldNotify) {
       return res.json({
-        reply_text:
-          `🚶 Triggered: moved=${Math.round(moved)}m ` +
-          `sinceLast=${Math.round(sinceLastMs / 1000)}s`,
+        reply_text: `🚶 You moved ~${Math.round(
+          moved
+        )}m. Want food, coffee, or water?`,
       });
     }
 
-    // ALWAYS respond with debug info so you know what's happening
-    return res.json({
-      reply_text:
-        `📍 Update: moved=${Math.round(moved)}m ` +
-        `sinceLast=${Math.round(sinceLastMs / 1000)}s ` +
-        `(need ${MIN_DISTANCE_METERS}m & ` +
-        `${MIN_NOTIFY_INTERVAL_MS / 1000}s)`,
-    });
+    return res.json({});
   }
 
-  // ----- DEFAULT -----
+  // DEFAULT
   return res.json({
-    reply_text:
-      `✅ upstream-stub got kind=${kind} receipt=${receipt}`,
+    reply_text: `✅ upstream-stub got kind=${kind} receipt=${receipt}`,
   });
 });
 
-app.listen(8080, () =>
-  console.log("upstream-stub listening on :8080")
-);
+app.listen(8080, () => console.log("upstream-stub listening on :8080"));
