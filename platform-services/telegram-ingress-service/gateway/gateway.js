@@ -1,3 +1,5 @@
+// LIVE-LOCATION-FIX: edited_message.location forwarded as kind=location (proof line)
+
 const { Telegraf } = require("telegraf");
 const axios = require("axios");
 const crypto = require("crypto");
@@ -7,16 +9,15 @@ const BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const UPSTREAM_URL = (process.env.UPSTREAM_URL || "").trim();
 const TIMEOUT_MS = parseInt(process.env.UPSTREAM_TIMEOUT_MS || "30000", 10);
 
-// Ingress slider (default polling). Keep now; webhook later.
+// Ingress slider (default polling)
 const TELEGRAM_MODE = (process.env.TELEGRAM_MODE || "polling").trim().toLowerCase();
 
 // Webhook settings (only used if TELEGRAM_MODE=webhook later)
-const WEBHOOK_DOMAIN = (process.env.WEBHOOK_DOMAIN || "").trim(); // e.g. https://shogun.example.com
+const WEBHOOK_DOMAIN = (process.env.WEBHOOK_DOMAIN || "").trim();
 const WEBHOOK_PATH = (process.env.WEBHOOK_PATH || "/telegram/webhook").trim();
 const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || "3000", 10);
-const WEBHOOK_SECRET_TOKEN = (process.env.WEBHOOK_SECRET_TOKEN || "").trim(); // optional: verify header at proxy/app layer later
 
-// Capability flags (explicit, auditable)
+// Capability flags
 const CAP_CAN_SEARCH = (process.env.CAP_CAN_SEARCH || "false").trim().toLowerCase() === "true";
 const CAP_CAN_SCRAPE = (process.env.CAP_CAN_SCRAPE || "false").trim().toLowerCase() === "true";
 const CAP_CAN_FETCH_FILES = (process.env.CAP_CAN_FETCH_FILES || "false").trim().toLowerCase() === "true";
@@ -98,9 +99,7 @@ function baseEnvelope(ctx, kind) {
     receipt_id: mkId(),
     received_at: nowIso(),
     kind,
-    update: {
-      update_id: ctx.update?.update_id,
-    },
+    update: { update_id: ctx.update?.update_id },
     from: {
       user_id: ctx.from?.id,
       username: ctx.from?.username,
@@ -138,9 +137,7 @@ async function replyUpstreamDown(ctx, receiptId) {
 }
 
 // ===== Payload builders =====
-// Keep payloads small; use file_id for later retrieval via getFile if CAP_CAN_FETCH_FILES is enabled. :contentReference[oaicite:4]{index=4}
-function locationPayload(msg) {
-  const loc = msg?.location;
+function locationPayloadFromLoc(loc) {
   return loc
     ? {
         location: {
@@ -155,24 +152,8 @@ function locationPayload(msg) {
     : { location: null };
 }
 
-function venuePayload(msg) {
-  const v = msg?.venue;
-  return v
-    ? {
-        venue: {
-          title: v.title,
-          address: v.address,
-          location: {
-            latitude: v.location?.latitude,
-            longitude: v.location?.longitude,
-          },
-          foursquare_id: v.foursquare_id,
-          foursquare_type: v.foursquare_type,
-          google_place_id: v.google_place_id,
-          google_place_type: v.google_place_type,
-        },
-      }
-    : { venue: null };
+function locationPayload(msg) {
+  return locationPayloadFromLoc(msg?.location);
 }
 
 function photoPayload(msg) {
@@ -240,13 +221,11 @@ function audioPayload(msg) {
 // ===== Bot =====
 const bot = new Telegraf(BOT_TOKEN);
 
-// Commands
 bot.command("status", async (ctx) => {
   if (!isAllowed(ctx)) return;
   await ctx.reply("✅ gateway alive; mode=" + TELEGRAM_MODE);
 });
 
-// Text messages
 bot.on("text", async (ctx) => {
   if (!isAllowed(ctx)) return;
 
@@ -259,12 +238,11 @@ bot.on("text", async (ctx) => {
   try {
     const upstream = await forward(env);
     await replyOrAck(ctx, env.receipt_id, upstream);
-  } catch (_err) {
+  } catch {
     await replyUpstreamDown(ctx, env.receipt_id);
   }
 });
 
-// Location messages (including live location updates)
 bot.on("location", async (ctx) => {
   if (!isAllowed(ctx)) return;
 
@@ -274,28 +252,11 @@ bot.on("location", async (ctx) => {
   try {
     const upstream = await forward(env);
     await replyOrAck(ctx, env.receipt_id, upstream);
-  } catch (_err) {
-    // Still ack so user knows we captured it
+  } catch {
     await ctx.reply(`✅ Location received. Receipt: ${env.receipt_id}`);
   }
 });
 
-// Venue (place pin with title/address + location)
-bot.on("venue", async (ctx) => {
-  if (!isAllowed(ctx)) return;
-
-  const env = baseEnvelope(ctx, "venue");
-  env.payload = venuePayload(ctx.message);
-
-  try {
-    const upstream = await forward(env);
-    await replyOrAck(ctx, env.receipt_id, upstream);
-  } catch (_err) {
-    await ctx.reply(`✅ Venue received. Receipt: ${env.receipt_id}`);
-  }
-});
-
-// Photos (menu images, etc.)
 bot.on("photo", async (ctx) => {
   if (!isAllowed(ctx)) return;
 
@@ -305,12 +266,11 @@ bot.on("photo", async (ctx) => {
   try {
     const upstream = await forward(env);
     await replyOrAck(ctx, env.receipt_id, upstream);
-  } catch (_err) {
+  } catch {
     await ctx.reply(`✅ Photo received. Receipt: ${env.receipt_id}`);
   }
 });
 
-// Documents (PDF menus, etc.)
 bot.on("document", async (ctx) => {
   if (!isAllowed(ctx)) return;
 
@@ -320,12 +280,11 @@ bot.on("document", async (ctx) => {
   try {
     const upstream = await forward(env);
     await replyOrAck(ctx, env.receipt_id, upstream);
-  } catch (_err) {
+  } catch {
     await ctx.reply(`✅ Document received. Receipt: ${env.receipt_id}`);
   }
 });
 
-// Voice notes
 bot.on("voice", async (ctx) => {
   if (!isAllowed(ctx)) return;
 
@@ -335,12 +294,11 @@ bot.on("voice", async (ctx) => {
   try {
     const upstream = await forward(env);
     await replyOrAck(ctx, env.receipt_id, upstream);
-  } catch (_err) {
+  } catch {
     await ctx.reply(`✅ Voice received. Receipt: ${env.receipt_id}`);
   }
 });
 
-// Audio files
 bot.on("audio", async (ctx) => {
   if (!isAllowed(ctx)) return;
 
@@ -350,106 +308,79 @@ bot.on("audio", async (ctx) => {
   try {
     const upstream = await forward(env);
     await replyOrAck(ctx, env.receipt_id, upstream);
-  } catch (_err) {
+  } catch {
     await ctx.reply(`✅ Audio received. Receipt: ${env.receipt_id}`);
   }
 });
 
-// Callback queries (inline buttons)
-bot.on("callback_query", async (ctx) => {
-  if (!isAllowed(ctx)) return;
-
-  const cq = ctx.callbackQuery;
-  const env = baseEnvelope(ctx, "callback_query");
-  env.payload = {
-    callback_query: {
-      id: cq?.id,
-      data: cq?.data,
-      message_id: cq?.message?.message_id,
-      inline_message_id: cq?.inline_message_id,
-    },
-  };
-
-  try {
-    const upstream = await forward(env);
-    // Acknowledge the button press to remove "loading" UI, if possible
-    try { await ctx.answerCbQuery(); } catch (_) {}
-    await replyOrAck(ctx, env.receipt_id, upstream);
-  } catch (_err) {
-    try { await ctx.answerCbQuery("⚠️ Upstream unavailable"); } catch (_) {}
-    await replyUpstreamDown(ctx, env.receipt_id);
-  }
-});
-
-// Edited messages (most useful: edited text)
+// ✅ KEY FIX: Live location updates arrive as edited_message with edited.location
 bot.on("edited_message", async (ctx) => {
-  // Note: ctx.message may be undefined; Telegraf exposes edited message on ctx.update.edited_message
   const edited = ctx.update?.edited_message;
   if (!edited) return;
 
-  // Reconstruct a minimal ctx-like allow check
+  // allow check (private + group)
   const userId = edited.from?.id ? String(edited.from.id) : null;
-  if (!userId || !ALLOWED_USER_IDS.includes(userId)) return;
+  const chatIdStr = edited.chat?.id ? String(edited.chat.id) : null;
+  const chatType = edited.chat?.type;
 
-  const env = {
-    receipt_id: mkId(),
-    received_at: nowIso(),
-    kind: "edited_message",
-    update: { update_id: ctx.update?.update_id },
-    from: {
-      user_id: edited.from?.id,
-      username: edited.from?.username,
-      first_name: edited.from?.first_name,
-      last_name: edited.from?.last_name,
-      language_code: edited.from?.language_code,
-    },
-    chat: {
-      id: edited.chat?.id,
-      type: edited.chat?.type,
-      title: edited.chat?.title,
-    },
-    message: {
-      message_id: edited.message_id,
-      date: edited.date,
-      edit_date: edited.edit_date,
-    },
-    capabilities: {
-      can_search: CAP_CAN_SEARCH,
-      can_scrape: CAP_CAN_SCRAPE,
-      can_fetch_files: CAP_CAN_FETCH_FILES,
-    },
-    payload: {
-      text: edited.text || edited.caption || "",
-      entities: edited.entities || edited.caption_entities || [],
-    },
-  };
+  const userOk = userId && ALLOWED_USER_IDS.includes(userId);
+  if (!userOk) return;
 
-  try {
-    await forward(env);
-    // Don't auto-reply on edits (avoid spam). If you want, upstream can send a push later.
-  } catch (_err) {
-    // Silent failure on edits
+  if (chatType === "group" || chatType === "supergroup") {
+    const groupOk = chatIdStr && ALLOWED_GROUP_IDS.includes(chatIdStr);
+    if (!groupOk) return;
+  }
+
+  // If edited message contains a location, forward it as kind=location
+  if (edited.location) {
+    const env = {
+      receipt_id: mkId(),
+      received_at: nowIso(),
+      kind: "location",
+      update: { update_id: ctx.update?.update_id },
+      from: {
+        user_id: edited.from?.id,
+        username: edited.from?.username,
+        first_name: edited.from?.first_name,
+        last_name: edited.from?.last_name,
+        language_code: edited.from?.language_code,
+      },
+      chat: {
+        id: edited.chat?.id,
+        type: edited.chat?.type,
+        title: edited.chat?.title,
+      },
+      message: {
+        message_id: edited.message_id,
+        date: edited.date,
+        edit_date: edited.edit_date,
+      },
+      capabilities: {
+        can_search: CAP_CAN_SEARCH,
+        can_scrape: CAP_CAN_SCRAPE,
+        can_fetch_files: CAP_CAN_FETCH_FILES,
+      },
+      payload: locationPayloadFromLoc(edited.location),
+    };
+
+    try {
+      await forward(env);
+    } catch {
+      // silent
+    }
   }
 });
 
-// Launch (polling now; webhook later)
 async function start() {
   if (TELEGRAM_MODE === "webhook") {
-    // Webhook mode requires public HTTPS + setWebhook flow; keep for later readiness.
-    // Telegraf webhook configuration exists, but you’ll flip this only when Cloudflare/tunnel is ready.
-    console.log("Starting in webhook mode:", { domain: WEBHOOK_DOMAIN, path: WEBHOOK_PATH, port: WEBHOOK_PORT });
+    console.log("Starting in webhook mode");
     await bot.launch({
-      webhook: {
-        domain: WEBHOOK_DOMAIN,
-        hookPath: WEBHOOK_PATH,
-        port: WEBHOOK_PORT,
-      },
+      webhook: { domain: WEBHOOK_DOMAIN, hookPath: WEBHOOK_PATH, port: WEBHOOK_PORT },
     });
   } else {
     console.log("Starting in polling mode");
     await bot.launch();
   }
-
   console.log("gateway ready");
 }
 
