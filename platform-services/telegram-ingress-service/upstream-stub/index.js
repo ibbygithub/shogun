@@ -1,18 +1,21 @@
 const express = require("express");
-const bodyParser = require("body-parser");
-
 const app = express();
-app.use(bodyParser.json());
+
+app.use(express.json({ limit: "2mb" }));
 
 // ===== Tunables (DEBUG MODE) =====
-const MOVE_THRESHOLD_METERS = 20;   // 👈 lowered for testing
-const COOLDOWN_SECONDS = 10;        // 👈 lowered for testing
+const MOVE_THRESHOLD_METERS = 20; // easy test
+const COOLDOWN_SECONDS = 10;      // easy test
 
 // ===== State (in-memory MVP) =====
-const lastByChat = new Map();
-// chatId → { lat, lon, ts, lastNotifyTs }
+// chatId -> { lat, lon, lastTs, lastNotifyTs }
+const state = new Map();
 
-// ===== Helpers =====
+function nowSec() {
+  return Math.floor(Date.now() / 1000);
+}
+
+// Haversine distance in meters
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -29,87 +32,74 @@ function haversine(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function now() {
-  return Math.floor(Date.now() / 1000);
-}
+app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
-// ===== Endpoint =====
-app.post("/", (req, res) => {
-  const ev = req.body;
-  const chatId = ev?.chat?.id;
+// One handler, mounted on BOTH routes so we can’t mismatch again.
+function handleTelegramEvent(req, res) {
+  const ev = req.body || {};
+  const kind = ev.kind || "unknown";
+  const receipt = ev.receipt_id || "no-receipt";
+  const chatId = ev.chat?.id;
 
-  if (!chatId) {
-    console.log("[drop] missing chat id");
-    return res.json({});
-  }
+  const loc = ev.payload?.location;
+  const lat = loc?.latitude;
+  const lon = loc?.longitude;
 
   console.log(
-    `[event] kind=${ev.kind} receipt=${ev.receipt_id} chat=${chatId}`,
-    ev.payload?.location
-      ? `lat=${ev.payload.location.latitude} lon=${ev.payload.location.longitude}`
-      : ""
+    `[event] kind=${kind} receipt=${receipt} chat=${chatId ?? "?"}` +
+      (loc ? ` lat=${lat} lon=${lon}` : "")
   );
 
-  // Only act on location events
-  if (ev.kind !== "location" || !ev.payload?.location) {
-    return res.json({});
-  }
+  if (!chatId) return res.json({});
 
-  const lat = ev.payload.location.latitude;
-  const lon = ev.payload.location.longitude;
-  const ts = now();
+  // Only do movement logic for location
+  if (kind !== "location" || !loc) return res.json({});
 
-  const prev = lastByChat.get(chatId);
+  const ts = nowSec();
+  const prev = state.get(chatId);
 
   if (!prev) {
-    lastByChat.set(chatId, {
-      lat,
-      lon,
-      ts,
-      lastNotifyTs: 0,
-    });
-
+    state.set(chatId, { lat, lon, lastTs: ts, lastNotifyTs: 0 });
+    // This is the message you expected on start:
     return res.json({
-      reply_text: `📍 Location tracking started\nlat=${lat}\nlon=${lon}`,
+      reply_text: `📍 Tracking started\nlat=${lat}\nlon=${lon}\n(threshold=${MOVE_THRESHOLD_METERS}m cooldown=${COOLDOWN_SECONDS}s)`,
     });
   }
 
   const moved = haversine(prev.lat, prev.lon, lat, lon);
-  const sinceLast = ts - prev.ts;
+  const sinceLast = ts - prev.lastTs;
   const sinceNotify = ts - prev.lastNotifyTs;
 
   const shouldNotify =
-    moved >= MOVE_THRESHOLD_METERS &&
-    sinceNotify >= COOLDOWN_SECONDS;
+    moved >= MOVE_THRESHOLD_METERS && sinceNotify >= COOLDOWN_SECONDS;
 
   console.log(
-    `[eval] chat=${chatId} moved=${moved.toFixed(
-      1
-    )}m sinceLast=${sinceLast}s sinceNotify=${sinceNotify}s notify=${shouldNotify}`
+    `[eval] chat=${chatId} moved=${moved.toFixed(1)}m sinceLast=${sinceLast}s sinceNotify=${sinceNotify}s notify=${shouldNotify}`
   );
 
-  // Update baseline every time
+  // update baseline each time
   prev.lat = lat;
   prev.lon = lon;
-  prev.ts = ts;
+  prev.lastTs = ts;
 
   if (!shouldNotify) {
-    lastByChat.set(chatId, prev);
+    state.set(chatId, prev);
     return res.json({});
   }
 
   prev.lastNotifyTs = ts;
-  lastByChat.set(chatId, prev);
+  state.set(chatId, prev);
 
   return res.json({
     reply_text: `📍 Trigger fired\nmoved=${moved.toFixed(
       1
-    )}m\nsinceLast=${sinceLast}s\nthreshold=${MOVE_THRESHOLD_METERS}m`,
+    )}m\nsinceLast=${sinceLast}s\nthreshold=${MOVE_THRESHOLD_METERS}m\ncooldown=${COOLDOWN_SECONDS}s`,
   });
-});
+}
 
-// ===== Boot =====
+// ✅ Accept both old and new paths
+app.post("/", handleTelegramEvent);
+app.post("/telegram/events", handleTelegramEvent);
+
 const PORT = 8080;
-app.listen(PORT, () => {
-  console.log(`upstream-stub listening on :${PORT}`);
-});
+app.listen(PORT, () => console.log(`upstream-stub listening on :${PORT}`));
