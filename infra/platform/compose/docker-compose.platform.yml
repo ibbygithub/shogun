@@ -1,29 +1,37 @@
 services:
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.6.7
     container_name: platform-traefik
     restart: unless-stopped
+
+    environment:
+      # Belt + suspenders: if Traefik ever defaults to an ancient Docker API, force modern.
+      - DOCKER_API_VERSION=1.52
+
     command:
       - --log.level=INFO
 
-      # Docker provider
+      # Docker provider (explicit endpoint)
       - --providers.docker=true
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
       - --providers.docker.exposedbydefault=false
 
-      # EntryPoints (LAN edge)
+      # EntryPoints
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
 
-      # Dashboard/API (routed; not wide-open)
+      # Dashboard/API (not insecure)
       - --api.dashboard=true
       - --api.insecure=false
 
-      # Access log (useful during MVP)
+      # Access logs (useful during MVP)
       - --accesslog=true
 
     ports:
       - "80:80"
       - "443:443"
+      # Debug-only: dashboard on localhost only (not LAN)
+      - "127.0.0.1:8080:8080"
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -34,7 +42,7 @@ services:
     labels:
       - traefik.enable=true
 
-      # Traefik dashboard (HTTP for now)
+      # Dashboard route via Host header (still routed on :80)
       - traefik.http.routers.traefik.rule=Host(`traefik.platform.ibbytech.com`)
       - traefik.http.routers.traefik.entrypoints=web
       - traefik.http.routers.traefik.service=api@internal
@@ -51,8 +59,6 @@ services:
       - platform_net
     labels:
       - traefik.enable=true
-
-      # LLM gateway (HTTP for now)
       - traefik.http.routers.llm.rule=Host(`llm.platform.ibbytech.com`)
       - traefik.http.routers.llm.entrypoints=web
       - traefik.http.services.llm.loadbalancer.server.port=8080
