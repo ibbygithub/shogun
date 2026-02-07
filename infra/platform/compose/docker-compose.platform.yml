@@ -5,13 +5,12 @@ services:
     restart: unless-stopped
 
     environment:
-      # Belt + suspenders: if Traefik ever defaults to an ancient Docker API, force modern.
       - DOCKER_API_VERSION=1.52
 
     command:
       - --log.level=INFO
 
-      # Docker provider (explicit endpoint)
+      # Docker provider
       - --providers.docker=true
       - --providers.docker.endpoint=unix:///var/run/docker.sock
       - --providers.docker.exposedbydefault=false
@@ -19,18 +18,19 @@ services:
       # EntryPoints
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      - --entrypoints.traefik.address=:8080
 
-      # Dashboard/API (not insecure)
+      # Dashboard/API
       - --api.dashboard=true
       - --api.insecure=false
 
-      # Access logs (useful during MVP)
+      # Access logs
       - --accesslog=true
 
     ports:
       - "80:80"
       - "443:443"
-      # Debug-only: dashboard on localhost only (not LAN)
+      # local-only dashboard/API
       - "127.0.0.1:8080:8080"
 
     volumes:
@@ -42,7 +42,12 @@ services:
     labels:
       - traefik.enable=true
 
-      # Dashboard route via Host header (still routed on :80)
+      # Dashboard/API on localhost:8080 (no DNS needed)
+      - traefik.http.routers.traefik-local.rule=PathPrefix(`/`)
+      - traefik.http.routers.traefik-local.entrypoints=traefik
+      - traefik.http.routers.traefik-local.service=api@internal
+
+      # Optional Host-based dashboard on :80
       - traefik.http.routers.traefik.rule=Host(`traefik.platform.ibbytech.com`)
       - traefik.http.routers.traefik.entrypoints=web
       - traefik.http.routers.traefik.service=api@internal
