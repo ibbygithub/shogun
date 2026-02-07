@@ -1,0 +1,62 @@
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: platform-traefik
+    restart: unless-stopped
+    command:
+      - --log.level=INFO
+
+      # Docker provider
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+
+      # EntryPoints (LAN edge)
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+
+      # Dashboard/API (routed; not wide-open)
+      - --api.dashboard=true
+      - --api.insecure=false
+
+      # Access log (useful during MVP)
+      - --accesslog=true
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    networks:
+      - platform_net
+
+    labels:
+      - traefik.enable=true
+
+      # Traefik dashboard (HTTP for now)
+      - traefik.http.routers.traefik.rule=Host(`traefik.platform.ibbytech.com`)
+      - traefik.http.routers.traefik.entrypoints=web
+      - traefik.http.routers.traefik.service=api@internal
+
+  llm-gateway:
+    build:
+      context: ../../../platform-services/llm-gateway-service
+      dockerfile: Dockerfile
+    container_name: platform-llm-gateway
+    restart: unless-stopped
+    env_file:
+      - ../../../platform-services/llm-gateway-service/.env
+    networks:
+      - platform_net
+    labels:
+      - traefik.enable=true
+
+      # LLM gateway (HTTP for now)
+      - traefik.http.routers.llm.rule=Host(`llm.platform.ibbytech.com`)
+      - traefik.http.routers.llm.entrypoints=web
+      - traefik.http.services.llm.loadbalancer.server.port=8080
+
+networks:
+  platform_net:
+    name: platform_net
