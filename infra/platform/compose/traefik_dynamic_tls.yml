@@ -1,0 +1,9 @@
+tls:
+  certificates:
+    - certFile: /certs/platform-cert.pem
+      keyFile: /certs/platform-key.pem
+
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: true
