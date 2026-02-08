@@ -5,3 +5,6 @@
 **/*.secret
 **/secrets/**
 !**/.env.example
+# TLS certs / private keys (never commit)
+infra/platform/compose/certs/*
+!infra/platform/compose/certs/.keep
