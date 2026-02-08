@@ -1,39 +1,43 @@
+version: "3.9"
+
+networks:
+  platform_net:
+    name: platform_net
+    driver: bridge
+
 services:
   traefik:
-    image: traefik:v3.6.7
+    image: traefik:v3.1
     container_name: platform-traefik
     restart: unless-stopped
 
-    environment:
-      - DOCKER_API_VERSION=1.52
-
     command:
+      # Logging
       - --log.level=INFO
 
-      # Docker provider
-      - --providers.docker=true
-      - --providers.docker.endpoint=unix:///var/run/docker.sock
-      - --providers.docker.exposedbydefault=false
-
-      # EntryPoints
+      # Entrypoints
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       - --entrypoints.traefik.address=:8080
 
       # Dashboard/API
       - --api.dashboard=true
-      - --api.insecure=false
 
-      # Access logs
-      - --accesslog=true
+      # Providers
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
 
     ports:
+      # Public/LAN
       - "80:80"
       - "443:443"
-      # local-only dashboard/API
+      # Keep the dashboard/API port LOCALHOST-ONLY on the host.
+      # (Still accessible via Host-based routing on 80/443.)
       - "127.0.0.1:8080:8080"
 
     volumes:
+      # Read-only is fine; Traefik needs to read container metadata.
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
     networks:
@@ -42,32 +46,43 @@ services:
     labels:
       - traefik.enable=true
 
-      # Dashboard/API on localhost:8080 (no DNS needed)
-      - traefik.http.routers.traefik-local.rule=PathPrefix(`/`)
-      - traefik.http.routers.traefik-local.entrypoints=traefik
-      - traefik.http.routers.traefik-local.service=api@internal
+      # ---- Dashboard via HTTP (optional but convenient) ----
+      - traefik.http.routers.traefik-http.entrypoints=web
+      - traefik.http.routers.traefik-http.rule=Host(`traefik.platform.ibbytech.com`)
+      - traefik.http.routers.traefik-http.service=api@internal
 
-      # Optional Host-based dashboard on :80
-      - traefik.http.routers.traefik.rule=Host(`traefik.platform.ibbytech.com`)
-      - traefik.http.routers.traefik.entrypoints=web
-      - traefik.http.routers.traefik.service=api@internal
+      # ---- Dashboard via HTTPS (this is what you want) ----
+      - traefik.http.routers.traefik-https.entrypoints=websecure
+      - traefik.http.routers.traefik-https.rule=Host(`traefik.platform.ibbytech.com`)
+      - traefik.http.routers.traefik-https.service=api@internal
+      - traefik.http.routers.traefik-https.tls=true
 
   llm-gateway:
     build:
       context: ../../../platform-services/llm-gateway-service
       dockerfile: Dockerfile
+    image: compose-llm-gateway
     container_name: platform-llm-gateway
     restart: unless-stopped
+
+    # This loads your real keys (file is ignored by git if you used **/.env)
     env_file:
       - ../../../platform-services/llm-gateway-service/.env
+
     networks:
       - platform_net
+
     labels:
       - traefik.enable=true
-      - traefik.http.routers.llm.rule=Host(`llm.platform.ibbytech.com`)
-      - traefik.http.routers.llm.entrypoints=web
+
+      # ---- LLM via HTTP ----
+      - traefik.http.routers.llm-http.entrypoints=web
+      - traefik.http.routers.llm-http.rule=Host(`llm.platform.ibbytech.com`)
+      - traefik.http.routers.llm-http.service=llm
       - traefik.http.services.llm.loadbalancer.server.port=8080
 
-networks:
-  platform_net:
-    name: platform_net
+      # ---- LLM via HTTPS ----
+      - traefik.http.routers.llm-https.entrypoints=websecure
+      - traefik.http.routers.llm-https.rule=Host(`llm.platform.ibbytech.com`)
+      - traefik.http.routers.llm-https.service=llm
+      - traefik.http.routers.llm-https.tls=true
