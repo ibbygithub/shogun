@@ -1,0 +1,36 @@
+version: "3.9"
+
+networks:
+  platform_net:
+    external: true
+    name: platform_net
+
+services:
+  llm-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: shogun-llm-gateway
+    container_name: platform-llm-gateway
+    restart: unless-stopped
+
+    env_file:
+      - ./.env
+
+    networks:
+      - platform_net
+
+    labels:
+      - traefik.enable=true
+
+      # LLM HTTP
+      - traefik.http.routers.llm-http.entrypoints=web
+      - traefik.http.routers.llm-http.rule=Host(`llm.platform.ibbytech.com`)
+      - traefik.http.routers.llm-http.service=llm
+      - traefik.http.services.llm.loadbalancer.server.port=8080
+
+      # LLM HTTPS (configured but not required)
+      - traefik.http.routers.llm-https.entrypoints=websecure
+      - traefik.http.routers.llm-https.rule=Host(`llm.platform.ibbytech.com`)
+      - traefik.http.routers.llm-https.service=llm
+      - traefik.http.routers.llm-https.tls=true

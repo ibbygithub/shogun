@@ -1,0 +1,36 @@
+version: "3.9"
+
+networks:
+  platform_net:
+    external: true
+    name: platform_net
+
+services:
+  places-google:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: shogun-places-google
+    container_name: platform-places-google
+    restart: unless-stopped
+
+    env_file:
+      - ./.env
+
+    networks:
+      - platform_net
+
+    labels:
+      - traefik.enable=true
+
+      # Places HTTP
+      - traefik.http.routers.places-http.entrypoints=web
+      - traefik.http.routers.places-http.rule=Host(`places.platform.ibbytech.com`)
+      - traefik.http.routers.places-http.service=places
+      - traefik.http.services.places.loadbalancer.server.port=8081
+
+      # Places HTTPS (configured but not required)
+      - traefik.http.routers.places-https.entrypoints=websecure
+      - traefik.http.routers.places-https.rule=Host(`places.platform.ibbytech.com`)
+      - traefik.http.routers.places-https.service=places
+      - traefik.http.routers.places-https.tls=true
