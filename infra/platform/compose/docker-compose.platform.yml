@@ -1,5 +1,3 @@
-version: "3.9"
-
 networks:
   platform_net:
     name: platform_net
@@ -46,12 +44,10 @@ services:
     labels:
       - traefik.enable=true
 
-      # Dashboard HTTP
       - traefik.http.routers.traefik-http.entrypoints=web
       - traefik.http.routers.traefik-http.rule=Host(`traefik.platform.ibbytech.com`)
       - traefik.http.routers.traefik-http.service=api@internal
 
-      # Dashboard HTTPS (deferred for now, but configured)
       - traefik.http.routers.traefik-https.entrypoints=websecure
       - traefik.http.routers.traefik-https.rule=Host(`traefik.platform.ibbytech.com`)
       - traefik.http.routers.traefik-https.service=api@internal
