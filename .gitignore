@@ -5,6 +5,6 @@
 **/*.secret
 **/secrets/**
 !**/.env.example
-# TLS certs / private keys (never commit)
+# Traefik TLS certs (local-only)
 infra/platform/compose/certs/*
 !infra/platform/compose/certs/.keep

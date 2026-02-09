@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "provider": "google",
+  "default_radius_m": 2000,
+  "default_details_top_n": 75,
+  "default_max_results": 50,
+  "cities": [
+    {
+      "city": "Osaka",
+      "country": "JP",
+      "neighborhoods": [
+        {
+          "id": "osaka_lodging_base",
+          "name": "Osaka Lodging Base",
+          "anchor": {
+            "address": "PUT_YOUR_LODGING_ADDRESS_HERE"
+          },
+          "radius_m": 2000,
+          "details_top_n": 75,
+          "categories": [
+            { "label": "ramen", "mode": "textsearch", "text_query": "ramen", "max_results": 50 },
+            { "label": "coffee", "mode": "nearby", "included_types": ["cafe"], "max_results": 50 },
+            { "label": "restrooms", "mode": "nearby", "included_types": ["public_bathroom"], "max_results": 50 },
+            { "label": "convenience", "mode": "nearby", "included_types": ["convenience_store"], "max_results": 50 }
+          ]
+        }
+      ]
+    }
+  ]
+}
