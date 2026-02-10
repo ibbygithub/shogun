@@ -1,0 +1,44 @@
+{
+  "defaults": {
+    "region": "JP",
+    "language": "en",
+    "radius_m": 2500,
+    "types": [
+      "restaurant"
+    ],
+    "keywords": [
+      "ramen"
+    ]
+  },
+  "cities": [
+    {
+      "name": "Osaka",
+      "country": "JP",
+      "neighborhoods": [
+        {
+          "id": "osaka-tenjinbashi-queen",
+          "name": "Osaka Base — Tenjinbashi Queen (Airbnb)",
+          "anchor": {
+            "label": "Tenjinbashi Queen — Room 202",
+            "address": "Room 202, Zeus Tenjinbashi Queen, 10-12 Namihana-cho, Kita-ku, Osaka City, Osaka Prefecture 530-0022, Japan"
+          },
+          "categories": [
+            {
+              "name": "Ramen near lodging",
+              "enabled": true,
+              "query": {
+                "keywords": [
+                  "ramen"
+                ],
+                "types": [
+                  "restaurant"
+                ],
+                "radius_m": 2500
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
