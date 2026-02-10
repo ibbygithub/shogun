@@ -1,79 +1,49 @@
 """
-Shogun — Places Google Service (MVP2)
-====================================
+Shogun Places (Google) Microservice
+==================================
 
-What this microservice does
----------------------------
-This service ingests a *seed file* of “neighborhood anchors” (usually your lodging address),
-resolves each anchor to a latitude/longitude, then uses **Google Places API (New)** to:
-  1) Discover nearby places (nearbySearch OR textSearch)
-  2) Enrich those places with details (Get Place Details)
-  3) Store results in Postgres (schema: `places`)
+Goal (MVP2):
+- Take "seed neighborhoods" (hotel address + categories) and ingest places into Postgres.
+- CRITICAL: All results must be anchored to the neighborhood's *physical location in Japan*,
+  NOT influenced by where the service is running (e.g., your datacenter in California).
 
-Why this exists as its own microservice
---------------------------------------
-You explicitly wanted Places to be independent from the LLM gateway (and other services).
-So this service owns:
-  - Google Places requests + cost controls (field masks, max results, top-N details)
-  - “Anchor resolution” and scoping rules
-  - Places database schema and writes
+This service enforces the design decisions you confirmed:
 
-IMPORTANT: Where code runs vs where files live
-----------------------------------------------
-- This Python code runs inside a Docker container on svcnode-01 (or dev machine via Docker).
-- `/app/...` paths refer to paths *inside the container image*.
-- Seeds and SQL are included in the image under:
-    /app/seeds/...
-    /app/sql/...
+1) Anchor resolution (address -> lat/lng):
+   - Uses Google Geocoding API
+   - Hard restrict: components=country:JP
+   - Bias: region=JP
 
-If you edit seeds or SQL, do it on Windows → git commit/push → pull on Linux.
-Do NOT hot-edit on Linux unless it’s a tiny troubleshooting step, and even then,
-you should port the change back to Windows and commit.
+2) Hybrid hygiene:
+   - If the seed neighborhood's country == "JP" => STRICT mode:
+       * If we cannot resolve a JP anchor, ingestion fails for that neighborhood.
+       * If results are not in JP, they are filtered out.
+   - Otherwise => SOFT mode (future "California mode"):
+       * We still ingest, but we keep the filtering rules looser.
 
-High-level flow (Seeds ingestion)
----------------------------------
-POST /v1/ingest/seeds
-  -> Load seeds JSON file (/app/seeds/neighborhoods.example.json unless overridden)
-  -> For each neighborhood:
-       -> Resolve anchor:
-            - If seed has anchor.location.lat/lng: use those
-            - Else if seed has anchor.address: geocode it (Google Geocoding API)
-       -> For each category:
-            -> Discover places
-            -> Rank + pick Top N
-            -> Fetch details for Top N
-            -> Upsert into places.google_places
-            -> Store raw snapshots into places.google_place_snapshots
+3) DB is the source of truth for resolved anchors:
+   - Once an anchor is resolved, it's stored in Postgres.
+   - Next runs do NOT re-guess (unless forced).
 
-Why your earlier results were from California
----------------------------------------------
-If the service uses a *text search without a location restriction*, Google can return
-results near the server’s region / inferred context, which can look “wrong”.
-The correct pattern for “near hotel” queries is:
-  - Resolve hotel address to lat/lng first
-  - Use Places requests with a location restriction (circle around that lat/lng)
-  - Optionally enforce hygiene rules (country == JP) to discard mismatches
+Why your Rocklin bug happened previously:
+- TextSearch without a location bias/restriction is effectively "ramen anywhere".
+- Even if you provide a Japan-looking address, if you never resolved it into a specific
+  JP lat/lng and never used locationBias/locationRestriction, Google can return "relevance"
+  results near the requester/service context.
+- Fix = Resolve address -> lat/lng (JP) + always use locationRestriction/bias around anchor.
 
-This script implements exactly that “address -> lat/lng -> constrained search” plan.
-
-Cost control strategy (MVP)
----------------------------
-- Use minimal field masks for discovery (nearby/text search)
-- Only call Details for Top N results (default 75, configurable)
-- Cache details results in DB (avoid refetching too frequently)
-- Keep categories limited during early testing
-
-Security / Secrets
-------------------
-- DB password + API key come from environment variables.
-- `.env` is ignored by git. Only `.env.example` is committed.
+Deployment model:
+- You develop on Windows -> commit/push -> pull on svcnode-01 -> docker compose up --build.
 """
 
+from __future__ import annotations
+
 import json
-import math
 import os
 import time
+import traceback
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
@@ -81,225 +51,412 @@ import psycopg2.extras
 import requests
 from flask import Flask, jsonify, request
 
-# =============================================================================
-# 1) Configuration
-# =============================================================================
+
+# ---------------------------------------------------------------------
+# Environment / Configuration
+# ---------------------------------------------------------------------
 
 def _env(name: str, default: Optional[str] = None) -> str:
-    """
-    Read an environment variable (required unless default provided).
-
-    Why:
-      - Ensures we fail fast on missing config instead of silently running broken.
-    """
-    v = os.getenv(name, default)
-    if v is None:
-        raise RuntimeError(f"Missing required env var: {name}")
-    return v
+    v = os.getenv(name)
+    if v is None or str(v).strip() == "":
+        if default is None:
+            raise RuntimeError(f"Missing required env var: {name}")
+        return default
+    return str(v).strip()
 
 
-# Service
-PORT = int(_env("PORT", "8081"))
-LOG_LEVEL = _env("LOG_LEVEL", "INFO").upper()
+def _env_int(name: str, default: int) -> int:
+    v = os.getenv(name)
+    if v is None or str(v).strip() == "":
+        return default
+    return int(v)
 
-# Google API
-GOOGLE_PLACES_API_KEY = _env("GOOGLE_PLACES_API_KEY", "")
-GOOGLE_REGION = _env("GOOGLE_REGION", "JP")      # used as a bias / default region
-GOOGLE_LANGUAGE = _env("GOOGLE_LANGUAGE", "en")  # MVP2 uses English; MVP3 can add Japanese
-GOOGLE_HYGIENE_COUNTRY = _env("GOOGLE_HYGIENE_COUNTRY", "JP")  # hygiene filter, post-response
 
-# Seed / Ingest defaults
-SEEDS_PATH = _env("SEEDS_PATH", "/app/seeds/neighborhoods.example.json")
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
-DEFAULT_RADIUS_M = int(_env("DEFAULT_RADIUS_M", "2000"))
-DEFAULT_MAX_RESULTS = int(_env("DEFAULT_MAX_RESULTS", "50"))
-DEFAULT_DETAILS_TOP_N = int(_env("DEFAULT_DETAILS_TOP_N", "75"))
 
-# Google Places "New API" endpoints
-PLACES_NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
-PLACES_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
-PLACES_DETAILS_URL = "https://places.googleapis.com/v1/places/"
+@dataclass(frozen=True)
+class AppConfig:
+    # Database
+    pg_host: str
+    pg_port: int
+    pg_database: str
+    pg_user: str
+    pg_password: str
 
-# Google Geocoding endpoint (used to resolve hotel address -> lat/lng)
-GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+    # Google
+    google_api_key: str
 
-# Field masks (cost control!)
-# Nearby/Text discovery masks should be minimal.
-DEFAULT_NEARBY_FIELDMASK = _env(
-    "GOOGLE_NEARBY_FIELDMASK",
-    "places.id,places.displayName,places.location,places.types,places.rating,"
-    "places.userRatingCount,places.priceLevel,places.primaryType,places.googleMapsUri,"
-    "places.formattedAddress",
+    # Defaults for Places payload shaping
+    default_lang: str = "en"
+    default_region: str = "JP"
+
+    # Field masks (cost control)
+    # NOTE: Field masks are your primary lever to reduce cost.
+    details_fieldmask: str = (
+        "id,displayName,formattedAddress,location,googleMapsUri,websiteUri,"
+        "internationalPhoneNumber,rating,userRatingCount,priceLevel,primaryType,types,"
+        "regularOpeningHours,paymentOptions,addressComponents"
+    )
+    nearby_fieldmask: str = (
+        "places.id,places.displayName,places.location,places.types,places.rating,"
+        "places.userRatingCount,places.priceLevel,places.primaryType,places.googleMapsUri,"
+        "places.formattedAddress"
+    )
+
+    # Seeds
+    seeds_path_primary: str = "/app/seeds/neighborhoods.json"
+    seeds_path_example: str = "/app/seeds/neighborhoods.example.json"
+
+
+CONFIG = AppConfig(
+    pg_host=_env("PGHOST"),
+    pg_port=_env_int("PGPORT", 5432),
+    pg_database=_env("PGDATABASE"),
+    pg_user=_env("PGUSER"),
+    pg_password=_env("PGPASSWORD"),
+    google_api_key=_env("GOOGLE_PLACES_API_KEY"),
 )
 
-# Details mask pulls what we actually want to store for “enriched place”
-DEFAULT_DETAILS_FIELDMASK = _env(
-    "GOOGLE_DETAILS_FIELDMASK",
-    "id,displayName,formattedAddress,location,googleMapsUri,websiteUri,internationalPhoneNumber,"
-    "rating,userRatingCount,priceLevel,primaryType,types,regularOpeningHours,paymentOptions,"
-    "addressComponents",
-)
+
+# ---------------------------------------------------------------------
+# Flask App + Simple Error Capture
+# ---------------------------------------------------------------------
+
+app = Flask(__name__)
+
+_LAST_ERROR: Optional[str] = None
+_LAST_ERROR_AT_UTC: Optional[str] = None
 
 
-# Database
-PGHOST = _env("PGHOST", "dbnode-01")
-PGPORT = int(_env("PGPORT", "5432"))
-PGDATABASE = _env("PGDATABASE", "shogun_v1")
-PGUSER = _env("PGUSER", "places_app")
-PGPASSWORD = _env("PGPASSWORD", "")
+def _set_last_error(msg: str) -> None:
+    global _LAST_ERROR, _LAST_ERROR_AT_UTC
+    _LAST_ERROR = msg
+    _LAST_ERROR_AT_UTC = _utc_now().isoformat()
 
 
-# =============================================================================
-# 2) Lightweight in-process cache (for short-lived repeat calls)
-# =============================================================================
-# NOTE: This is not meant to replace DB caching. DB is the real cache across restarts.
-# This is just to reduce duplicate HTTP calls during a single ingestion run.
-
-@dataclass
-class CacheEntry:
-    value: Any
-    expires_at: float
-
-
-_CACHE: Dict[str, CacheEntry] = {}
-
-
-def cache_get(key: str) -> Optional[Any]:
-    entry = _CACHE.get(key)
-    if not entry:
-        return None
-    if time.time() >= entry.expires_at:
-        _CACHE.pop(key, None)
-        return None
-    return entry.value
-
-
-def cache_set(key: str, value: Any, ttl_s: int = 60) -> None:
-    _CACHE[key] = CacheEntry(value=value, expires_at=time.time() + ttl_s)
-
-
-# =============================================================================
-# 3) Database helpers
-# =============================================================================
-
-def db_conn():
+@app.errorhandler(Exception)
+def _handle_exception(e: Exception):
     """
-    Open a new Postgres connection.
+    Hard rule: never silently swallow errors.
+    When you get a 500, you should see a usable stack trace in Docker logs,
+    and you should also see a summarized error in /health.
+    """
+    tb = traceback.format_exc()
+    _set_last_error(f"{type(e).__name__}: {e}")
+    # Print for Docker logs
+    print("=== UNHANDLED EXCEPTION ===")
+    print(tb)
+    return jsonify({
+        "ok": False,
+        "error": f"{type(e).__name__}: {str(e)}",
+        "time": int(time.time()),
+    }), 500
 
-    Note:
-      - We intentionally create connections “as needed” for simplicity in MVP.
-      - If load grows, replace with a connection pool.
+
+# ---------------------------------------------------------------------
+# DB Helpers
+# ---------------------------------------------------------------------
+
+def db_connect():
+    """
+    Creates a new DB connection. We keep it simple for MVP2.
+    If you later want pooling, we'd add it (psycopg_pool or pgbouncer).
     """
     return psycopg2.connect(
-        host=PGHOST,
-        port=PGPORT,
-        dbname=PGDATABASE,
-        user=PGUSER,
-        password=PGPASSWORD,
+        host=CONFIG.pg_host,
+        port=CONFIG.pg_port,
+        dbname=CONFIG.pg_database,
+        user=CONFIG.pg_user,
+        password=CONFIG.pg_password,
         connect_timeout=5,
+        sslmode="prefer",  # keeps it compatible with your pg_hba rules
     )
 
 
-def db_exec(sql: str, params: Optional[Tuple[Any, ...]] = None) -> None:
-    with db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-
-
-def db_health() -> Tuple[bool, Optional[str]]:
-    """
-    Return (db_ok, db_error_str)
-    """
+def db_ping() -> Tuple[bool, Optional[str]]:
     try:
-        with db_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1;")
-                _ = cur.fetchone()
+        conn = db_connect()
+        cur = conn.cursor()
+        cur.execute("select 1;")
+        cur.fetchone()
+        conn.close()
         return True, None
     except Exception as e:
-        return False, str(e)
+        return False, f"{type(e).__name__}: {e}"
 
 
-# =============================================================================
-# 4) Google HTTP helpers
-# =============================================================================
-
-def _headers(fieldmask: str) -> Dict[str, str]:
+def db_bootstrap_schema() -> None:
     """
-    Google Places (New) requires:
-      - X-Goog-Api-Key
-      - X-Goog-FieldMask
+    Ensures anchor storage exists. Your project already created:
+      - places.google_places
+      - places.google_place_snapshots
+    But MVP2 also needs a table to store resolved neighborhood anchors.
     """
-    return {
+    sql = """
+    CREATE SCHEMA IF NOT EXISTS places;
+
+    CREATE TABLE IF NOT EXISTS places.neighborhood_anchors (
+      provider                text not null,
+      neighborhood_id         text not null,
+      city                    text,
+      country                 text,
+      input_address           text,
+      resolved_place_id       text,
+      resolved_formatted_addr text,
+      resolved_country        text,
+      lat                     double precision,
+      lng                     double precision,
+      resolution_method       text,
+      raw_geocode_json        jsonb,
+      created_utc             timestamptz not null default now(),
+      updated_utc             timestamptz not null default now(),
+      PRIMARY KEY (provider, neighborhood_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_neighborhood_anchors_country
+      ON places.neighborhood_anchors (country);
+    """
+    conn = db_connect()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+    finally:
+        conn.close()
+
+
+def db_upsert_anchor(
+    neighborhood_id: str,
+    city: str,
+    country: str,
+    input_address: str,
+    resolved_place_id: Optional[str],
+    resolved_formatted_addr: Optional[str],
+    resolved_country: Optional[str],
+    lat: float,
+    lng: float,
+    resolution_method: str,
+    raw_geocode_json: Dict[str, Any],
+) -> None:
+    sql = """
+    INSERT INTO places.neighborhood_anchors (
+      provider, neighborhood_id, city, country, input_address,
+      resolved_place_id, resolved_formatted_addr, resolved_country,
+      lat, lng, resolution_method, raw_geocode_json, created_utc, updated_utc
+    )
+    VALUES (
+      'google', %(neighborhood_id)s, %(city)s, %(country)s, %(input_address)s,
+      %(resolved_place_id)s, %(resolved_formatted_addr)s, %(resolved_country)s,
+      %(lat)s, %(lng)s, %(resolution_method)s, %(raw_geocode_json)s::jsonb,
+      now(), now()
+    )
+    ON CONFLICT (provider, neighborhood_id)
+    DO UPDATE SET
+      city = EXCLUDED.city,
+      country = EXCLUDED.country,
+      input_address = EXCLUDED.input_address,
+      resolved_place_id = EXCLUDED.resolved_place_id,
+      resolved_formatted_addr = EXCLUDED.resolved_formatted_addr,
+      resolved_country = EXCLUDED.resolved_country,
+      lat = EXCLUDED.lat,
+      lng = EXCLUDED.lng,
+      resolution_method = EXCLUDED.resolution_method,
+      raw_geocode_json = EXCLUDED.raw_geocode_json,
+      updated_utc = now();
+    """
+    conn = db_connect()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "neighborhood_id": neighborhood_id,
+                    "city": city,
+                    "country": country,
+                    "input_address": input_address,
+                    "resolved_place_id": resolved_place_id,
+                    "resolved_formatted_addr": resolved_formatted_addr,
+                    "resolved_country": resolved_country,
+                    "lat": lat,
+                    "lng": lng,
+                    "resolution_method": resolution_method,
+                    "raw_geocode_json": json.dumps(raw_geocode_json),
+                })
+    finally:
+        conn.close()
+
+
+def db_get_anchor(neighborhood_id: str) -> Optional[Dict[str, Any]]:
+    sql = """
+    SELECT provider, neighborhood_id, city, country,
+           input_address, resolved_place_id, resolved_formatted_addr,
+           resolved_country, lat, lng, resolution_method, raw_geocode_json,
+           created_utc, updated_utc
+    FROM places.neighborhood_anchors
+    WHERE provider='google' AND neighborhood_id=%s;
+    """
+    conn = db_connect()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, (neighborhood_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------
+# Seeds Loading
+# ---------------------------------------------------------------------
+
+def load_seeds_from_disk() -> Dict[str, Any]:
+    """
+    Loads seeds JSON from /app/seeds.
+    You can later add a new endpoint to upload/replace seeds,
+    but for MVP2 this is file-based and Git-controlled.
+    """
+    path = CONFIG.seeds_path_primary
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    # fallback to example
+    path = CONFIG.seeds_path_example
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    raise RuntimeError(
+        "No seeds file found. Expected one of:\n"
+        f"- {CONFIG.seeds_path_primary}\n"
+        f"- {CONFIG.seeds_path_example}\n"
+        "Fix by ensuring seeds are included in the image and exist at /app/seeds."
+    )
+
+
+# ---------------------------------------------------------------------
+# Google APIs - Anchor Geocoding
+# ---------------------------------------------------------------------
+
+def google_geocode_address_jp(address: str) -> Dict[str, Any]:
+    """
+    Canonical anchor resolver for Japan neighborhoods.
+
+    Uses Google Geocoding API:
+      - components=country:JP  (hard restriction)
+      - region=JP              (bias)
+    """
+    url = "https://maps.googleapis.com/maps/api/geocode/json"
+    params = {
+        "address": address,
+        "components": "country:JP",
+        "region": "JP",
+        "key": CONFIG.google_api_key,
+    }
+    r = requests.get(url, params=params, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+
+def extract_geocode_best_result(geo_json: Dict[str, Any]) -> Tuple[float, float, str, Optional[str]]:
+    """
+    Returns:
+      lat, lng, formatted_address, country_short (e.g. 'JP')
+    """
+    status = geo_json.get("status")
+    if status != "OK":
+        raise RuntimeError(f"Geocode failed: status={status}, error={geo_json.get('error_message')}")
+
+    results = geo_json.get("results") or []
+    if not results:
+        raise RuntimeError("Geocode returned OK but results list is empty.")
+
+    best = results[0]
+    loc = best["geometry"]["location"]
+    lat = float(loc["lat"])
+    lng = float(loc["lng"])
+    formatted = best.get("formatted_address", "")
+
+    # Parse country component (short_name)
+    country_short = None
+    for c in best.get("address_components", []):
+        types = c.get("types") or []
+        if "country" in types:
+            country_short = c.get("short_name")
+            break
+
+    return lat, lng, formatted, country_short
+
+
+# ---------------------------------------------------------------------
+# Google Places API (New) - Search helpers
+# ---------------------------------------------------------------------
+
+GOOGLE_PLACES_BASE = "https://places.googleapis.com/v1"
+
+def google_places_text_search(
+    text_query: str,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    max_results: int,
+    region_code: str,
+    language_code: str,
+) -> Dict[str, Any]:
+    """
+    Places (New) text search.
+    IMPORTANT: We provide locationBias circle + regionCode.
+    This is not optional if you want "near my hotel".
+
+    Docs (conceptually): SearchText request body supports locationBias and regionCode.
+    """
+    url = f"{GOOGLE_PLACES_BASE}/places:searchText"
+
+    body = {
+        "textQuery": text_query,
+        "maxResultCount": int(max_results),
+        "languageCode": language_code,
+        "regionCode": region_code,
+        "locationBias": {
+            "circle": {
+                "center": {"latitude": lat, "longitude": lng},
+                "radius": float(radius_m),
+            }
+        },
+    }
+
+    headers = {
         "Content-Type": "application/json",
-        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-        "X-Goog-FieldMask": fieldmask,
+        "X-Goog-Api-Key": CONFIG.google_api_key,
+        "X-Goog-FieldMask": CONFIG.nearby_fieldmask,
     }
 
-
-def google_nearby_search(
-    lat: float,
-    lng: float,
-    radius_m: int,
-    included_types: Optional[List[str]],
-    max_results: int,
-    language_code: str,
-    region_code: str,
-    fieldmask: str = DEFAULT_NEARBY_FIELDMASK,
-) -> Dict[str, Any]:
-    """
-    Places Nearby Search (New API)
-
-    This is the “correct” query style for “near my hotel” use-cases.
-    It uses a strict locationRestriction around the anchor lat/lng.
-
-    Docs hint: Nearby search requires a locationRestriction shape and returns nearby places.
-    """
-    payload: Dict[str, Any] = {
-        "languageCode": language_code,
-        "regionCode": region_code,
-        "maxResultCount": max_results,
-        "locationRestriction": {
-            "circle": {
-                "center": {"latitude": lat, "longitude": lng},
-                "radius": float(radius_m),
-            }
-        },
-    }
-    if included_types:
-        payload["includedTypes"] = included_types
-
-    resp = requests.post(PLACES_NEARBY_URL, headers=_headers(fieldmask), json=payload, timeout=20)
-    return {"status_code": resp.status_code, "json": resp.json() if resp.content else {}}
+    r = requests.post(url, headers=headers, json=body, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
-def google_text_search(
-    query: str,
+def google_places_nearby_search(
+    included_types: List[str],
     lat: float,
     lng: float,
     radius_m: int,
     max_results: int,
-    language_code: str,
     region_code: str,
-    fieldmask: str = DEFAULT_NEARBY_FIELDMASK,
+    language_code: str,
 ) -> Dict[str, Any]:
     """
-    Places Text Search (New API)
-
-    We still apply a strict locationRestriction circle so it behaves like:
-      “text query near this hotel”.
-
-    This is essential. Without locationRestriction, results can “drift” and look wrong.
-
-    Why not just add 'Osaka' to the query?
-      - You said you do NOT want hard-coded “Osaka” logic that prevents future non-Japan use.
-      - Constraining by lat/lng is the correct general solution.
+    Places (New) nearby search.
+    IMPORTANT: This uses locationRestriction circle (hard restriction).
     """
-    payload: Dict[str, Any] = {
-        "textQuery": query,
+    url = f"{GOOGLE_PLACES_BASE}/places:searchNearby"
+
+    body = {
+        "includedTypes": included_types,
+        "maxResultCount": int(max_results),
         "languageCode": language_code,
         "regionCode": region_code,
-        "maxResultCount": max_results,
         "locationRestriction": {
             "circle": {
                 "center": {"latitude": lat, "longitude": lng},
@@ -308,193 +465,184 @@ def google_text_search(
         },
     }
 
-    resp = requests.post(PLACES_TEXT_URL, headers=_headers(fieldmask), json=payload, timeout=20)
-    return {"status_code": resp.status_code, "json": resp.json() if resp.content else {}}
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": CONFIG.google_api_key,
+        "X-Goog-FieldMask": CONFIG.nearby_fieldmask,
+    }
+
+    r = requests.post(url, headers=headers, json=body, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
-def google_place_details(
-    place_id: str,
-    language_code: str,
-    region_code: str,
-    fieldmask: str = DEFAULT_DETAILS_FIELDMASK,
-) -> Dict[str, Any]:
+def google_places_details(place_id: str, language_code: str, region_code: str) -> Dict[str, Any]:
     """
-    Places Details (New API): GET /v1/places/{placeId}
-
-    This is where costs can grow, so:
-      - Only call details for Top N
-      - Store results in DB to avoid refetching
+    Place details. This is where we get paymentOptions, phone, website, opening hours, etc.
     """
-    url = f"{PLACES_DETAILS_URL}{place_id}"
-    params = {"languageCode": language_code, "regionCode": region_code}
-    resp = requests.get(url, headers=_headers(fieldmask), params=params, timeout=20)
-    return {"status_code": resp.status_code, "json": resp.json() if resp.content else {}}
+    url = f"{GOOGLE_PLACES_BASE}/places/{place_id}"
+    params = {
+        "languageCode": language_code,
+        "regionCode": region_code,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": CONFIG.google_api_key,
+        "X-Goog-FieldMask": CONFIG.details_fieldmask,
+    }
+    r = requests.get(url, headers=headers, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
-# =============================================================================
-# 5) Parsing helpers
-# =============================================================================
-
-def _get_display_name(place_obj: Dict[str, Any]) -> str:
+def place_country_from_address_components(details_json: Dict[str, Any]) -> Optional[str]:
     """
-    Google returns displayName as object: {"text": "...", "languageCode": "..."}
+    Extracts country shortName if present.
+    With Places (New), addressComponents include 'shortText' sometimes.
+    We store the whole json for forensics.
     """
-    dn = place_obj.get("displayName")
-    if isinstance(dn, dict):
-        return dn.get("text") or ""
-    if isinstance(dn, str):
-        return dn
-    return ""
+    comps = details_json.get("addressComponents") or []
+    for c in comps:
+        types = c.get("types") or []
+        if "country" in types:
+            # Places uses 'shortText' / 'longText' often
+            short = c.get("shortText") or c.get("shortName") or c.get("short_text")
+            if isinstance(short, str) and short.strip():
+                return short.strip()
+    return None
 
 
-def _get_location(place_obj: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
-    loc = place_obj.get("location") or {}
-    lat = loc.get("latitude")
-    lng = loc.get("longitude")
-    return lat, lng
+# ---------------------------------------------------------------------
+# DB Writes for Places + Snapshots
+# ---------------------------------------------------------------------
 
-
-def rank_places(places: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def db_insert_snapshot(snapshot_type: str, category_obj: Dict[str, Any], raw_json: Dict[str, Any]) -> None:
     """
-    Rank places “best first” using a simple heuristic.
-
-    MVP heuristic:
-      - rating desc
-      - userRatingCount desc
+    Records raw API payloads for debugging and audit.
     """
-    def _score(p: Dict[str, Any]) -> Tuple[float, int]:
-        rating = float(p.get("rating") or 0.0)
-        urc = int(p.get("userRatingCount") or 0)
-        return rating, urc
+    sql = """
+    INSERT INTO places.google_place_snapshots (snapshot_type, snapshot_utc, raw_json)
+    VALUES (%s, now(), %s::jsonb);
+    """
+    payload = dict(raw_json)
+    payload["category"] = category_obj  # attach category metadata
+    conn = db_connect()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (snapshot_type, json.dumps(payload)))
+    finally:
+        conn.close()
 
-    return sorted(places, key=_score, reverse=True)
 
-
-# =============================================================================
-# 6) Persistence helpers (Postgres)
-# =============================================================================
-
-def upsert_place(
-    place_id: str,
-    details_json: Dict[str, Any],
-    nearby_json: Optional[Dict[str, Any]],
-    source_neighborhood_id: str,
-    source_city: str,
-    source_country: str,
+def db_upsert_place(
+    neighborhood_id: str,
+    city: str,
+    country: str,
+    nearby_place: Dict[str, Any],
+    details_json: Optional[Dict[str, Any]],
+    raw_nearby_json: Dict[str, Any],
 ) -> None:
     """
-    Upsert a place into places.google_places.
-
-    This table is the “canonical” view of a place.
-    Raw snapshots go into places.google_place_snapshots.
+    Upserts a place into places.google_places.
+    Primary key is place_id.
     """
-    display_name = _get_display_name(details_json)
-    formatted_address = details_json.get("formattedAddress")
-    primary_type = details_json.get("primaryType")
-    types = details_json.get("types") or []
-    lat, lng = _get_location(details_json)
+    place_id = nearby_place.get("id") or nearby_place.get("placeId")
+    if not place_id:
+        return
 
-    google_maps_uri = details_json.get("googleMapsUri")
-    website_uri = details_json.get("websiteUri")
-    international_phone = details_json.get("internationalPhoneNumber")
+    # Pull fields from details if present; fall back to nearby where possible
+    def _safe_text(x: Any) -> Optional[str]:
+        if isinstance(x, str) and x.strip():
+            return x.strip()
+        return None
 
-    rating = details_json.get("rating")
-    user_rating_count = details_json.get("userRatingCount")
-    price_level = details_json.get("priceLevel")
+    display_name = None
+    dn = (details_json or {}).get("displayName") or nearby_place.get("displayName")
+    if isinstance(dn, dict):
+        display_name = _safe_text(dn.get("text"))
+    elif isinstance(dn, str):
+        display_name = _safe_text(dn)
 
-    opening_hours_json = details_json.get("regularOpeningHours")
-    payment_options_json = details_json.get("paymentOptions")
+    formatted_address = _safe_text((details_json or {}).get("formattedAddress") or nearby_place.get("formattedAddress"))
 
+    location = (details_json or {}).get("location") or nearby_place.get("location") or {}
+    lat = location.get("latitude")
+    lng = location.get("longitude")
+
+    google_maps_uri = _safe_text((details_json or {}).get("googleMapsUri") or nearby_place.get("googleMapsUri"))
+    website_uri = _safe_text((details_json or {}).get("websiteUri"))
+    international_phone = _safe_text((details_json or {}).get("internationalPhoneNumber"))
+    primary_type = _safe_text((details_json or {}).get("primaryType") or nearby_place.get("primaryType"))
+    types = (details_json or {}).get("types") or nearby_place.get("types")
+    rating = (details_json or {}).get("rating") or nearby_place.get("rating")
+    user_rating_count = (details_json or {}).get("userRatingCount") or nearby_place.get("userRatingCount")
+    price_level = _safe_text((details_json or {}).get("priceLevel") or nearby_place.get("priceLevel"))
+
+    # Opening hours & openNow (if present)
+    opening_hours_json = (details_json or {}).get("regularOpeningHours")
     open_now = None
     if isinstance(opening_hours_json, dict):
         open_now = opening_hours_json.get("openNow")
 
+    payment_options_json = (details_json or {}).get("paymentOptions")
+
+    # Track fetch times
+    details_fetch = _utc_now() if details_json else None
+    nearby_fetch = _utc_now()
+
     sql = """
     INSERT INTO places.google_places (
-        place_id,
-        display_name,
-        primary_type,
-        types,
-        formatted_address,
-        lat,
-        lng,
-        google_maps_uri,
-        website_uri,
-        international_phone,
-        rating,
-        user_rating_count,
-        price_level,
-        open_now,
-        opening_hours_json,
-        payment_options_json,
-        source_neighborhood_id,
-        source_city,
-        source_country,
-        last_details_fetch_utc,
-        last_nearby_fetch_utc,
-        raw_details_json,
-        raw_nearby_json,
-        created_utc,
-        updated_utc
+      place_id, display_name, primary_type, types, formatted_address,
+      lat, lng, google_maps_uri, website_uri, international_phone,
+      rating, user_rating_count, price_level, open_now,
+      opening_hours_json, payment_options_json,
+      source_neighborhood_id, source_city, source_country,
+      last_details_fetch_utc, last_nearby_fetch_utc,
+      raw_details_json, raw_nearby_json,
+      created_utc, updated_utc
     )
     VALUES (
-        %(place_id)s,
-        %(display_name)s,
-        %(primary_type)s,
-        %(types)s,
-        %(formatted_address)s,
-        %(lat)s,
-        %(lng)s,
-        %(google_maps_uri)s,
-        %(website_uri)s,
-        %(international_phone)s,
-        %(rating)s,
-        %(user_rating_count)s,
-        %(price_level)s,
-        %(open_now)s,
-        %(opening_hours_json)s,
-        %(payment_options_json)s,
-        %(source_neighborhood_id)s,
-        %(source_city)s,
-        %(source_country)s,
-        NOW(),
-        NOW(),
-        %(raw_details_json)s,
-        %(raw_nearby_json)s,
-        NOW(),
-        NOW()
+      %(place_id)s, %(display_name)s, %(primary_type)s, %(types)s, %(formatted_address)s,
+      %(lat)s, %(lng)s, %(google_maps_uri)s, %(website_uri)s, %(international_phone)s,
+      %(rating)s, %(user_rating_count)s, %(price_level)s, %(open_now)s,
+      %(opening_hours_json)s::jsonb, %(payment_options_json)s::jsonb,
+      %(source_neighborhood_id)s, %(source_city)s, %(source_country)s,
+      %(last_details_fetch_utc)s, %(last_nearby_fetch_utc)s,
+      %(raw_details_json)s::jsonb, %(raw_nearby_json)s::jsonb,
+      now(), now()
     )
-    ON CONFLICT (place_id) DO UPDATE SET
-        display_name = EXCLUDED.display_name,
-        primary_type = EXCLUDED.primary_type,
-        types = EXCLUDED.types,
-        formatted_address = EXCLUDED.formatted_address,
-        lat = EXCLUDED.lat,
-        lng = EXCLUDED.lng,
-        google_maps_uri = EXCLUDED.google_maps_uri,
-        website_uri = EXCLUDED.website_uri,
-        international_phone = EXCLUDED.international_phone,
-        rating = EXCLUDED.rating,
-        user_rating_count = EXCLUDED.user_rating_count,
-        price_level = EXCLUDED.price_level,
-        open_now = EXCLUDED.open_now,
-        opening_hours_json = EXCLUDED.opening_hours_json,
-        payment_options_json = EXCLUDED.payment_options_json,
-        source_neighborhood_id = EXCLUDED.source_neighborhood_id,
-        source_city = EXCLUDED.source_city,
-        source_country = EXCLUDED.source_country,
-        last_details_fetch_utc = NOW(),
-        last_nearby_fetch_utc = NOW(),
-        raw_details_json = EXCLUDED.raw_details_json,
-        raw_nearby_json = EXCLUDED.raw_nearby_json,
-        updated_utc = NOW();
+    ON CONFLICT (place_id)
+    DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      primary_type = EXCLUDED.primary_type,
+      types = EXCLUDED.types,
+      formatted_address = EXCLUDED.formatted_address,
+      lat = EXCLUDED.lat,
+      lng = EXCLUDED.lng,
+      google_maps_uri = EXCLUDED.google_maps_uri,
+      website_uri = COALESCE(EXCLUDED.website_uri, places.google_places.website_uri),
+      international_phone = COALESCE(EXCLUDED.international_phone, places.google_places.international_phone),
+      rating = EXCLUDED.rating,
+      user_rating_count = EXCLUDED.user_rating_count,
+      price_level = EXCLUDED.price_level,
+      open_now = EXCLUDED.open_now,
+      opening_hours_json = COALESCE(EXCLUDED.opening_hours_json, places.google_places.opening_hours_json),
+      payment_options_json = COALESCE(EXCLUDED.payment_options_json, places.google_places.payment_options_json),
+      source_neighborhood_id = EXCLUDED.source_neighborhood_id,
+      source_city = EXCLUDED.source_city,
+      source_country = EXCLUDED.source_country,
+      last_details_fetch_utc = COALESCE(EXCLUDED.last_details_fetch_utc, places.google_places.last_details_fetch_utc),
+      last_nearby_fetch_utc = EXCLUDED.last_nearby_fetch_utc,
+      raw_details_json = COALESCE(EXCLUDED.raw_details_json, places.google_places.raw_details_json),
+      raw_nearby_json = EXCLUDED.raw_nearby_json,
+      updated_utc = now();
     """
-
-    with db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                sql,
-                {
+    conn = db_connect()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
                     "place_id": place_id,
                     "display_name": display_name,
                     "primary_type": primary_type,
@@ -509,489 +657,352 @@ def upsert_place(
                     "user_rating_count": user_rating_count,
                     "price_level": price_level,
                     "open_now": open_now,
-                    "opening_hours_json": psycopg2.extras.Json(opening_hours_json) if opening_hours_json else None,
-                    "payment_options_json": psycopg2.extras.Json(payment_options_json) if payment_options_json else None,
-                    "source_neighborhood_id": source_neighborhood_id,
-                    "source_city": source_city,
-                    "source_country": source_country,
-                    "raw_details_json": psycopg2.extras.Json(details_json),
-                    "raw_nearby_json": psycopg2.extras.Json(nearby_json) if nearby_json else None,
-                },
-            )
+                    "opening_hours_json": json.dumps(opening_hours_json) if opening_hours_json is not None else None,
+                    "payment_options_json": json.dumps(payment_options_json) if payment_options_json is not None else None,
+                    "source_neighborhood_id": neighborhood_id,
+                    "source_city": city,
+                    "source_country": country,
+                    "last_details_fetch_utc": details_fetch,
+                    "last_nearby_fetch_utc": nearby_fetch,
+                    "raw_details_json": json.dumps(details_json) if details_json is not None else None,
+                    "raw_nearby_json": json.dumps(raw_nearby_json),
+                })
+    finally:
+        conn.close()
 
 
-def snapshot_raw(snapshot_type: str, raw_json: Dict[str, Any]) -> None:
-    """
-    Store raw API responses in places.google_place_snapshots for debugging/audit.
-    """
-    sql = """
-    INSERT INTO places.google_place_snapshots (snapshot_type, snapshot_utc, raw_json)
-    VALUES (%s, NOW(), %s::jsonb);
-    """
-    with db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, (snapshot_type, json.dumps(raw_json)))
+# ---------------------------------------------------------------------
+# Ingest Orchestration
+# ---------------------------------------------------------------------
 
-
-# =============================================================================
-# 7) Anchor resolution (Hotel address -> lat/lng)
-# =============================================================================
-
-def resolve_address_to_latlng(
+def resolve_or_get_anchor(
+    neighborhood_id: str,
+    city: str,
+    country: str,
     address: str,
-    country_code: str,
-    region_code: str,
-    language_code: str,
-) -> Tuple[bool, Optional[Tuple[float, float]], Optional[str], Optional[str]]:
+    strict_if_country_is_jp: bool = True,
+    force: bool = False,
+) -> Tuple[bool, Optional[float], Optional[float], Optional[str]]:
     """
-    Resolve a human-readable address to (lat, lng) using Google Geocoding API.
-
     Returns:
-      (ok, (lat,lng) or None, formatted_address or None, error_str or None)
+      ok, lat, lng, reason
 
-    Why this is required:
-      - Places "nearby" queries must use lat/lng
-      - This avoids “server location drift”
-      - This avoids hard-coding “Osaka” or other city text hacks
-
-    We strongly restrict to the intended country using:
-      components=country:JP   (hard restriction)
-    And provide a region bias:
-      region=JP
+    - If anchor exists in DB and force=False -> return it.
+    - Otherwise geocode address (JP) and store result.
+    - STRICT logic (Japan seeds):
+        If country == "JP" and resolved_country != "JP" -> fail.
     """
-    cache_key = f"geocode:{country_code}:{region_code}:{language_code}:{address}"
-    cached = cache_get(cache_key)
-    if cached:
-        return True, cached["latlng"], cached.get("formatted_address"), None
+    existing = None if force else db_get_anchor(neighborhood_id)
+    if existing and existing.get("lat") is not None and existing.get("lng") is not None:
+        return True, float(existing["lat"]), float(existing["lng"]), "anchor_from_db"
 
-    params = {
-        "address": address,
-        "key": GOOGLE_PLACES_API_KEY,
-        "language": language_code,
-        "region": region_code.lower(),
-        "components": f"country:{country_code}",
-    }
+    geo = google_geocode_address_jp(address)
+    lat, lng, formatted, resolved_country = extract_geocode_best_result(geo)
 
-    try:
-        resp = requests.get(GEOCODE_URL, params=params, timeout=20)
-        data = resp.json() if resp.content else {}
-    except Exception as e:
-        return False, None, None, f"geocode_http_error:{type(e).__name__}:{e}"
+    # STRICT if JP seed
+    strict_mode = strict_if_country_is_jp and (country.upper() == "JP")
+    if strict_mode and (resolved_country is None or resolved_country.upper() != "JP"):
+        # Store for forensics, but return failure
+        db_upsert_anchor(
+            neighborhood_id=neighborhood_id,
+            city=city,
+            country=country,
+            input_address=address,
+            resolved_place_id=None,
+            resolved_formatted_addr=formatted,
+            resolved_country=resolved_country,
+            lat=lat,
+            lng=lng,
+            resolution_method="geocoding_api_components_country_jp",
+            raw_geocode_json=geo,
+        )
+        return False, None, None, f"STRICT_JP: geocode resolved_country={resolved_country} not JP"
 
-    if data.get("status") != "OK":
-        return False, None, None, f"geocode_status:{data.get('status')}:{data.get('error_message')}"
-
-    results = data.get("results") or []
-    if not results:
-        return False, None, None, "geocode_no_results"
-
-    top = results[0]
-    loc = (top.get("geometry") or {}).get("location") or {}
-    lat = loc.get("lat")
-    lng = loc.get("lng")
-    if lat is None or lng is None:
-        return False, None, None, "geocode_missing_latlng"
-
-    formatted = top.get("formatted_address")
-
-    out = {"latlng": (float(lat), float(lng)), "formatted_address": formatted}
-    cache_set(cache_key, out, ttl_s=3600)
-    return True, out["latlng"], formatted, None
+    db_upsert_anchor(
+        neighborhood_id=neighborhood_id,
+        city=city,
+        country=country,
+        input_address=address,
+        resolved_place_id=None,
+        resolved_formatted_addr=formatted,
+        resolved_country=resolved_country,
+        lat=lat,
+        lng=lng,
+        resolution_method="geocoding_api_components_country_jp",
+        raw_geocode_json=geo,
+    )
+    return True, lat, lng, "anchor_geocoded_and_stored"
 
 
-# =============================================================================
-# 8) Core ingest logic
-# =============================================================================
-
-def ingest_from_seed(seed: Dict[str, Any]) -> Dict[str, Any]:
+def ingest_one_neighborhood(
+    city: str,
+    country: str,
+    neighborhood: Dict[str, Any],
+    defaults: Dict[str, Any],
+) -> Dict[str, Any]:
     """
-    Ingest one neighborhood seed definition.
-
-    Seed includes:
-      - neighborhood id
-      - city/country
-      - anchor: { address: "..."} OR { location: {lat,lng} }
-      - categories: list of category search definitions
-
-    Returns stats dict for observability.
+    Ingests one neighborhood:
+    1) Resolve anchor
+    2) For each category: discover places (textsearch or nearby)
+    3) For each place: fetch details
+    4) Write snapshots + upsert place rows
     """
     stats = {
-        "neighborhoods": 0,
+        "neighborhood_id": neighborhood.get("id"),
+        "anchor_resolved": 0,
+        "anchor_failures": 0,
         "categories": 0,
         "places_discovered": 0,
         "places_enriched": 0,
-        "errors": 0,
-        "anchor_resolved": 0,
-        "anchor_failures": 0,
         "filtered_country_mismatch": 0,
+        "errors": 0,
+        "error_messages": [],
     }
 
-    neighborhood_id = seed.get("id") or "unknown_neighborhood"
-    city = seed.get("city") or "unknown_city"
-    country = seed.get("country") or GOOGLE_REGION
+    nid = neighborhood.get("id")
+    if not nid:
+        stats["errors"] += 1
+        stats["error_messages"].append("Neighborhood missing id")
+        return stats
 
-    # --- Resolve anchor lat/lng ---
-    anchor = seed.get("anchor") or {}
-    anchor_loc = anchor.get("location") or {}
-    lat = anchor_loc.get("lat")
-    lng = anchor_loc.get("lng")
+    anchor = neighborhood.get("anchor") or {}
+    address = (anchor.get("address") or "").strip()
+    if not address:
+        stats["errors"] += 1
+        stats["error_messages"].append(f"Neighborhood {nid} missing anchor.address")
+        return stats
 
-    if lat is None or lng is None:
-        address = anchor.get("address")
-        if not address:
-            stats["errors"] += 1
-            stats["anchor_failures"] += 1
-            snapshot_raw("anchor_error", {
-                "error": "seed_missing_anchor_location_and_address",
-                "neighborhood_id": neighborhood_id,
-                "seed": seed,
-            })
-            return stats
+    strict_mode = (country.upper() == "JP")
 
-        ok, latlng, formatted, err = resolve_address_to_latlng(
-            address=address,
-            country_code=country,
-            region_code=GOOGLE_REGION,
-            language_code=GOOGLE_LANGUAGE,
-        )
-        if not ok or not latlng:
-            stats["errors"] += 1
-            stats["anchor_failures"] += 1
-            snapshot_raw("anchor_error", {
-                "error": err or "anchor_geocode_failed",
-                "neighborhood_id": neighborhood_id,
-                "address": address,
-                "country": country,
-                "region": GOOGLE_REGION,
-                "language": GOOGLE_LANGUAGE,
-            })
-            return stats
+    ok, lat, lng, reason = resolve_or_get_anchor(
+        neighborhood_id=nid,
+        city=city,
+        country=country,
+        address=address,
+        strict_if_country_is_jp=True,
+        force=False,
+    )
+    if not ok:
+        stats["anchor_failures"] += 1
+        stats["errors"] += 1
+        stats["error_messages"].append(f"Anchor resolution failed: {reason}")
+        return stats
 
-        lat, lng = latlng
-        stats["anchor_resolved"] += 1
-        snapshot_raw("anchor_resolved", {
-            "neighborhood_id": neighborhood_id,
-            "address": address,
-            "formatted_address": formatted,
-            "country": country,
-            "lat": lat,
-            "lng": lng,
-        })
+    stats["anchor_resolved"] += 1
 
-    # Ingest each category
-    radius_m = int(seed.get("radius_m") or DEFAULT_RADIUS_M)
-    details_top_n = int(seed.get("details_top_n") or DEFAULT_DETAILS_TOP_N)
+    radius_m = int(neighborhood.get("radius_m") or defaults.get("default_radius_m") or 2000)
+    details_top_n = int(neighborhood.get("details_top_n") or defaults.get("default_details_top_n") or 50)
+    max_results_default = int(defaults.get("default_max_results") or 50)
 
-    categories = seed.get("categories") or []
-    stats["neighborhoods"] += 1
+    language_code = defaults.get("lang") or CONFIG.default_lang
+    region_code = defaults.get("region") or CONFIG.default_region
 
+    categories = neighborhood.get("categories") or []
     for cat in categories:
-        stats["categories"] += 1
-        mode = cat.get("mode")
-        label = cat.get("label", "unknown")
-        max_results = int(cat.get("max_results") or DEFAULT_MAX_RESULTS)
-
-        discovered: List[Dict[str, Any]] = []
-
         try:
-            if mode == "nearby":
-                included_types = cat.get("included_types") or []
-                resp = google_nearby_search(
-                    lat=lat,
-                    lng=lng,
-                    radius_m=radius_m,
-                    included_types=included_types,
-                    max_results=max_results,
-                    language_code=GOOGLE_LANGUAGE,
-                    region_code=GOOGLE_REGION,
-                )
-                snapshot_raw("nearby", {
-                    "neighborhood_id": neighborhood_id,
-                    "city": city,
-                    "country": country,
-                    "category": cat,
-                    "response": resp,
-                })
-                places = (resp.get("json") or {}).get("places") or []
-                discovered = places
+            stats["categories"] += 1
+            mode = (cat.get("mode") or "").strip().lower()
+            label = (cat.get("label") or "unknown").strip()
+            max_results = int(cat.get("max_results") or max_results_default)
 
-            elif mode == "textsearch":
-                text_query = cat.get("text_query") or ""
+            # Discover places
+            if mode == "textsearch":
+                text_query = (cat.get("text_query") or "").strip()
                 if not text_query:
-                    raise ValueError("textsearch requires text_query")
-
-                resp = google_text_search(
-                    query=text_query,
+                    stats["errors"] += 1
+                    stats["error_messages"].append(f"Category {label}: textsearch missing text_query")
+                    continue
+                nearby_raw = google_places_text_search(
+                    text_query=text_query,
                     lat=lat,
                     lng=lng,
                     radius_m=radius_m,
                     max_results=max_results,
-                    language_code=GOOGLE_LANGUAGE,
-                    region_code=GOOGLE_REGION,
+                    region_code=region_code,
+                    language_code=language_code,
                 )
-                # Store raw snapshot for debugging, including category
-                snapshot_raw("textsearch", {
-                    "neighborhood_id": neighborhood_id,
-                    "city": city,
-                    "country": country,
-                    "category": cat,
-                    "response": resp,
-                })
-                places = (resp.get("json") or {}).get("places") or []
-                discovered = places
+                places_list = nearby_raw.get("places") or []
+
+            elif mode == "nearby":
+                included_types = cat.get("included_types") or []
+                if not included_types:
+                    stats["errors"] += 1
+                    stats["error_messages"].append(f"Category {label}: nearby missing included_types")
+                    continue
+                nearby_raw = google_places_nearby_search(
+                    included_types=included_types,
+                    lat=lat,
+                    lng=lng,
+                    radius_m=radius_m,
+                    max_results=max_results,
+                    region_code=region_code,
+                    language_code=language_code,
+                )
+                places_list = nearby_raw.get("places") or []
+
             else:
-                raise ValueError(f"unknown category mode: {mode}")
+                stats["errors"] += 1
+                stats["error_messages"].append(f"Category {label}: unknown mode={mode}")
+                continue
+
+            stats["places_discovered"] += len(places_list)
+
+            # Snapshot the discovery payload
+            db_insert_snapshot(
+                snapshot_type="discover",
+                category_obj={"city": city, "country": country, "neighborhood_id": nid, **cat},
+                raw_json={"places": places_list, "raw": nearby_raw},
+            )
+
+            # Enrich places with details (top N)
+            # NOTE: For MVP2, we enrich up to details_top_n. Later we can add caching/refresh logic.
+            to_enrich = places_list[:details_top_n]
+            for p in to_enrich:
+                place_id = p.get("id")
+                if not place_id:
+                    continue
+
+                details = google_places_details(
+                    place_id=place_id,
+                    language_code=language_code,
+                    region_code=region_code,
+                )
+
+                # Country hygiene
+                resolved_place_country = place_country_from_address_components(details)
+                if strict_mode and resolved_place_country and resolved_place_country.upper() != "JP":
+                    stats["filtered_country_mismatch"] += 1
+                    continue
+
+                # Snapshot details payload
+                db_insert_snapshot(
+                    snapshot_type="details",
+                    category_obj={"city": city, "country": country, "neighborhood_id": nid, **cat},
+                    raw_json=details,
+                )
+
+                db_upsert_place(
+                    neighborhood_id=nid,
+                    city=city,
+                    country=country,
+                    nearby_place=p,
+                    details_json=details,
+                    raw_nearby_json={"places": places_list, "raw": nearby_raw},
+                )
+                stats["places_enriched"] += 1
 
         except Exception as e:
             stats["errors"] += 1
-            snapshot_raw("category_error", {
-                "neighborhood_id": neighborhood_id,
-                "city": city,
-                "country": country,
-                "category": cat,
-                "error": f"{type(e).__name__}:{e}",
-            })
-            continue
-
-        stats["places_discovered"] += len(discovered)
-
-        # Rank and take top N for details
-        ranked = rank_places(discovered)
-        top_for_details = ranked[:max(0, details_top_n)]
-
-        for p in top_for_details:
-            place_id = p.get("id")
-            if not place_id:
-                continue
-
-            # Details caching key
-            cache_key = f"details:{place_id}:{GOOGLE_LANGUAGE}:{GOOGLE_REGION}"
-            cached_details = cache_get(cache_key)
-
-            if cached_details:
-                details = cached_details
-                status_code = 200
-            else:
-                details_resp = google_place_details(
-                    place_id=place_id,
-                    language_code=GOOGLE_LANGUAGE,
-                    region_code=GOOGLE_REGION,
-                )
-                status_code = details_resp.get("status_code")
-                details = details_resp.get("json") or {}
-                snapshot_raw("details", details)
-                if status_code == 200 and details:
-                    cache_set(cache_key, details, ttl_s=3600)
-
-            if status_code != 200 or not details:
-                stats["errors"] += 1
-                continue
-
-            # --- Hygiene filter: enforce country match (minimum) ---
-            # We do NOT hard-code "must include Osaka".
-            # We only enforce "must be Japan" (JP) by checking addressComponents.
-            if GOOGLE_HYGIENE_COUNTRY:
-                comps = details.get("addressComponents") or []
-                found_country = None
-                for c in comps:
-                    t = c.get("types") or []
-                    if "country" in t:
-                        found_country = (c.get("shortText") or c.get("short_name") or "").strip()
-                        break
-
-                if found_country and found_country.upper() != GOOGLE_HYGIENE_COUNTRY.upper():
-                    stats["filtered_country_mismatch"] += 1
-                    snapshot_raw("filtered_country_mismatch", {
-                        "place_id": place_id,
-                        "expected_country": GOOGLE_HYGIENE_COUNTRY,
-                        "found_country": found_country,
-                        "details": details,
-                    })
-                    continue
-
-            # Persist the enriched place
-            try:
-                upsert_place(
-                    place_id=place_id,
-                    details_json=details,
-                    nearby_json=p,
-                    source_neighborhood_id=neighborhood_id,
-                    source_city=city,
-                    source_country=country,
-                )
-                stats["places_enriched"] += 1
-            except Exception as e:
-                stats["errors"] += 1
-                snapshot_raw("db_upsert_error", {
-                    "place_id": place_id,
-                    "neighborhood_id": neighborhood_id,
-                    "error": f"{type(e).__name__}:{e}",
-                })
+            stats["error_messages"].append(f"Category error ({cat.get('label')}): {type(e).__name__}: {e}")
 
     return stats
 
 
-# =============================================================================
-# 9) Flask app + routes
-# =============================================================================
-
-app = Flask(__name__)
-
-
-@app.get("/health")
-def health():
+def ingest_seeds() -> Dict[str, Any]:
     """
-    Health endpoint for Traefik / monitoring.
-
-    Returns:
-      - ok: service is up
-      - google_key_set: whether API key exists
-      - db_ok: ability to run SELECT 1
-      - defaults: shows current masks/region/lang for fast debugging
+    Main ingestion entry:
+    - loads seeds file
+    - bootstraps DB anchor table
+    - ingests each neighborhood
     """
-    ok_db, db_err = db_health()
-    return jsonify(
-        {
-            "ok": True,
-            "time": int(time.time()),
-            "google_key_set": bool(GOOGLE_PLACES_API_KEY),
-            "db": {
-                "host": PGHOST,
-                "port": PGPORT,
-                "database": PGDATABASE,
-                "user": PGUSER,
-            },
-            "db_ok": ok_db,
-            "db_error": db_err,
-            "defaults": {
-                "region": GOOGLE_REGION,
-                "lang": GOOGLE_LANGUAGE,
-                "nearby_fieldmask": DEFAULT_NEARBY_FIELDMASK,
-                "details_fieldmask": DEFAULT_DETAILS_FIELDMASK,
-            },
-        }
-    )
+    db_bootstrap_schema()
 
+    seeds = load_seeds_from_disk()
+    defaults = {
+        "default_radius_m": seeds.get("default_radius_m", 2000),
+        "default_details_top_n": seeds.get("default_details_top_n", 50),
+        "default_max_results": seeds.get("default_max_results", 50),
+        "lang": seeds.get("lang", CONFIG.default_lang),
+        "region": seeds.get("region", CONFIG.default_region),
+    }
 
-@app.get("/v1/details/<place_id>")
-def details(place_id: str):
-    """
-    Convenience endpoint: fetch details for a place_id and return JSON.
-    Useful for quick validation during development.
-    """
-    r = google_place_details(place_id, GOOGLE_LANGUAGE, GOOGLE_REGION)
-    return jsonify(r), (200 if r.get("status_code") == 200 else 400)
-
-
-@app.get("/v1/nearby")
-def nearby():
-    """
-    Convenience endpoint: run a nearby query with querystring params:
-      lat, lng, radius_m, included_types (comma)
-    """
-    lat = float(request.args.get("lat", "0"))
-    lng = float(request.args.get("lng", "0"))
-    radius_m = int(request.args.get("radius_m", str(DEFAULT_RADIUS_M)))
-    included_types_raw = request.args.get("included_types", "")
-    included_types = [x.strip() for x in included_types_raw.split(",") if x.strip()] if included_types_raw else []
-
-    r = google_nearby_search(
-        lat=lat,
-        lng=lng,
-        radius_m=radius_m,
-        included_types=included_types,
-        max_results=DEFAULT_MAX_RESULTS,
-        language_code=GOOGLE_LANGUAGE,
-        region_code=GOOGLE_REGION,
-    )
-    return jsonify(r), (200 if r.get("status_code") in (200, 400) else 500)
-
-
-@app.post("/v1/ingest/seeds")
-def ingest_seeds():
-    """
-    Primary MVP endpoint.
-
-    Loads the seed JSON file and ingests it into Postgres.
-    """
-    try:
-        with open(SEEDS_PATH, "r", encoding="utf-8") as f:
-            seeds_obj = json.load(f)
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"failed_to_load_seeds:{type(e).__name__}:{e}", "seeds_path": SEEDS_PATH}), 500
-
-    # Expected schema:
-    # {
-    #   "version": 1,
-    #   "provider": "google",
-    #   "cities": [
-    #      { "city":"Osaka", "country":"JP", "neighborhoods":[ ... ] }
-    #   ]
-    # }
-    cities = seeds_obj.get("cities") or []
-    total_stats = {
+    overall = {
         "ok": True,
         "stats": {
             "neighborhoods": 0,
+            "anchor_resolved": 0,
+            "anchor_failures": 0,
             "categories": 0,
             "places_discovered": 0,
             "places_enriched": 0,
-            "errors": 0,
-            "anchor_resolved": 0,
-            "anchor_failures": 0,
             "filtered_country_mismatch": 0,
+            "errors": 0,
         },
+        "neighborhood_results": [],
     }
 
-    for city_obj in cities:
-        city_name = city_obj.get("city") or "unknown_city"
-        country = city_obj.get("country") or GOOGLE_REGION
-        neighborhoods = city_obj.get("neighborhoods") or []
+    cities = seeds.get("cities") or []
+    for c in cities:
+        city = (c.get("city") or "").strip()
+        country = (c.get("country") or "").strip().upper()
+        if not city or not country:
+            overall["stats"]["errors"] += 1
+            continue
 
+        neighborhoods = c.get("neighborhoods") or []
         for n in neighborhoods:
-            # Normalize seed to what ingest_from_seed expects
-            seed = dict(n)
-            seed["city"] = city_name
-            seed["country"] = country
+            overall["stats"]["neighborhoods"] += 1
+            res = ingest_one_neighborhood(city=city, country=country, neighborhood=n, defaults=defaults)
+            overall["neighborhood_results"].append(res)
 
-            s = ingest_from_seed(seed)
-            for k, v in s.items():
-                total_stats["stats"][k] = total_stats["stats"].get(k, 0) + int(v)
+            # aggregate
+            overall["stats"]["anchor_resolved"] += res.get("anchor_resolved", 0)
+            overall["stats"]["anchor_failures"] += res.get("anchor_failures", 0)
+            overall["stats"]["categories"] += res.get("categories", 0)
+            overall["stats"]["places_discovered"] += res.get("places_discovered", 0)
+            overall["stats"]["places_enriched"] += res.get("places_enriched", 0)
+            overall["stats"]["filtered_country_mismatch"] += res.get("filtered_country_mismatch", 0)
+            overall["stats"]["errors"] += res.get("errors", 0)
 
-    return jsonify(total_stats), 200
+    if overall["stats"]["errors"] > 0:
+        overall["ok"] = False
+    return overall
 
 
-# =============================================================================
-# 10) Entrypoint (Gunicorn)
-# =============================================================================
+# ---------------------------------------------------------------------
+# HTTP Endpoints
+# ---------------------------------------------------------------------
 
-def main():
-    """
-    Run with Gunicorn for a “production-ish” behavior in Docker.
-    """
-    from gunicorn.app.base import BaseApplication
-
-    class StandaloneApplication(BaseApplication):
-        def __init__(self, flask_app, options=None):
-            self.options = options or {}
-            self.application = flask_app
-            super().__init__()
-
-        def load_config(self):
-            for k, v in self.options.items():
-                self.cfg.set(k, v)
-
-        def load(self):
-            return self.application
-
-    options = {
-        "bind": f"0.0.0.0:{PORT}",
-        "workers": 2,
-        "timeout": 60,
-        "loglevel": LOG_LEVEL.lower(),
+@app.get("/health")
+def health():
+    db_ok, db_err = db_ping()
+    payload = {
+        "ok": True,
+        "time": int(time.time()),
+        "google_key_set": bool(CONFIG.google_api_key),
+        "db": {
+            "host": CONFIG.pg_host,
+            "port": CONFIG.pg_port,
+            "database": CONFIG.pg_database,
+            "user": CONFIG.pg_user,
+        },
+        "db_ok": db_ok,
+        "db_error": db_err,
+        "defaults": {
+            "lang": CONFIG.default_lang,
+            "region": CONFIG.default_region,
+            "nearby_fieldmask": CONFIG.nearby_fieldmask,
+            "details_fieldmask": CONFIG.details_fieldmask,
+        },
+        "last_error": _LAST_ERROR,
+        "last_error_at_utc": _LAST_ERROR_AT_UTC,
     }
-    StandaloneApplication(app, options).run()
+    return jsonify(payload)
 
 
+@app.post("/v1/ingest/seeds")
+def ingest_seeds_endpoint():
+    """
+    Runs ingestion using the on-disk seeds.
+    Returns stats + per-neighborhood breakdown.
+    """
+    result = ingest_seeds()
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------
+# Local dev entrypoint (optional)
+# ---------------------------------------------------------------------
 if __name__ == "__main__":
-    main()
+    # For local debugging only. In docker we run gunicorn.
+    app.run(host="0.0.0.0", port=8081, debug=True)
