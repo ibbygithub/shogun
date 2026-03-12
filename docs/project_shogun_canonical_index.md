@@ -1,15 +1,16 @@
 # Project Shogun — Canonical Index
 
-**Status:** Authoritative snapshot (Option A)
-**Purpose:** Freeze what has been clearly decided so far into durable working documents.
+**Status:** Active — updated post-reboot (2026-03-10)
+**Purpose:** Single entry point for confirmed decisions and current repo structure.
 
 ---
 
 ## What This Index Is
 
-This document is the *entry point* for Project Shogun’s canvas-based documentation. It intentionally contains **only confirmed decisions** and points to focused canvases that will be created next.
+This document is the *entry point* for Project Shogun's documentation.
+It contains **only confirmed decisions** and reflects current repo state.
 
-Chat remains exploratory. Canvases are canonical.
+Chat remains exploratory. This index is canonical.
 
 ---
 
@@ -24,12 +25,12 @@ Chat remains exploratory. Canvases are canonical.
 ### Messaging & Platform
 
 - Interface: **Telegram Bot**
-- Transport: **Webhooks only** (no polling)
+- Transport: **Webhooks** (polling fallback for dev)
 - Location input:
   - One-time location
   - **Live Location (preferred)**
 - Shogun does **not** poll GPS.
-- Update cadence is **client-controlled and variable** (seconds to \~1 minute).
+- Update cadence is **client-controlled and variable** (seconds to ~1 minute).
 
 ### Privacy & Reality Constraints
 
@@ -37,38 +38,46 @@ Chat remains exploratory. Canvases are canonical.
 - Location accuracy and frequency are **not guaranteed**.
 - System must tolerate missed or delayed updates.
 
-### Architecture (High-Level)
+### Architecture (Confirmed)
 
-- Telegram → Webhook → FastAPI control plane
-- Work is **queued**, not handled inline
-- Backend runs **headless on Linux**, 24/7
-- State is minimal and explicit (no hidden memory assumptions)
+```
+Telegram → telegram.platform.ibbytech.com → shogun-core (UPSTREAM_URL)
+                                                   ↓
+                                         Movement / radius logic
+                                                   ↓
+                              places.platform.ibbytech.com  (place discovery)
+                                                   ↓
+                                llm.platform.ibbytech.com   (LLM response)
+                                                   ↓
+                                         Reply text → Telegram
+```
 
-### Infrastructure & Resource Model (MVP)
+- Telegram events are received by **platform's telegram-gateway** and forwarded as structured JSON envelopes to `shogun-core`
+- `shogun-core` is Shogun's control plane — it owns movement logic, orchestration, and state
+- All external API calls go through **platform gateways**, never directly to vendors
+- Work is **queued or handled inline** (TBD per load); no polling
 
-- MVP includes standing up **reusable infrastructure resources** via **Docker containers**.
-- These resources expose capabilities through **API-accessible services**, intended for reuse across:
-  - Future Shogun iterations
-  - Other products and agents
-- Initial resource types include (non-exhaustive):
-  - Web scrapers
-  - Parsers / normalizers
-  - Embedders
-- Resources are integrated using **MCP-style service boundaries** and containerized deployment.
-- Multiple external service providers are supported and evaluated, including:
-  - OpenAI
-  - Google
-  - Anthropic
-- For the MVP, the goal is **capability validation and integration**, not provider lock-in or optimization.
+### Infrastructure Model
 
-### Movement Model (Conceptual)
+- Platform (`c:\git\work\platform`) owns and deploys all shared gateway services
+- Shogun (`c:\git\work\shogun`) owns only Shogun application services
+- Shogun **consumes** platform services via HTTP; it does not host them
+- Code moves between machines via **Git push/pull only**
 
-- Movement is inferred by **distance delta** between updates
-- Radius-based triggers (e.g., \~100 meters)
-- Logic must handle:
-  - Irregular updates
-  - No movement
-  - Large jumps
+### Platform Services Shogun Consumes
+
+| Service | FQDN | Used For |
+|:---|:---|:---|
+| Telegram Gateway | `telegram.platform.ibbytech.com` | Receive Telegram events → forward to shogun-core |
+| Places Google | `places.platform.ibbytech.com` | Geocode, nearby search, place details |
+| LLM Gateway | `llm.platform.ibbytech.com` | Chat completions (Gemini/OpenAI/Anthropic) |
+| Scraper | `scrape.platform.ibbytech.com` | Web scraping (future use) |
+
+### Movement Model
+
+- Movement is inferred by **distance delta** between location updates
+- Radius-based triggers (~100 meters default)
+- Logic must handle: irregular updates, no movement, large jumps
 
 ---
 
@@ -82,42 +91,54 @@ Chat remains exploratory. Canvases are canonical.
 
 ---
 
-## Upcoming Focused Canvases (To Be Created)
+## Repo Structure (Current)
 
-1. **Project Shogun — MVP Definition**
+```
+shogun/
+├── app-services/
+│   └── shogun-places-ingester/     ← Seeds neighborhoods → Postgres via platform places gateway
+│   └── shogun-core/                ← TO BUILD: Telegram event processor + movement + LLM orchestration
+├── docs/
+│   ├── project_shogun_canonical_index.md   ← THIS FILE
+│   ├── handoff/                    ← Closed milestone records (MVP 1, 2.1)
+│   ├── MVP/                        ← MVP scope documents (some outdated)
+│   ├── DB/                         ← DB schema and data policy docs
+│   └── architecture/               ← Architecture diagrams
+├── infra/                          ← Infrastructure config (review for relevance)
+└── repo/                           ← Miscellaneous backup files (review for cleanup)
+```
 
-   - Goals, non-goals, success criteria
-
-2. **Project Shogun — Location & Movement Model**
-
-   - Distance calculations
-   - Thresholds
-   - Edge cases
-
-3. **Project Shogun — System Architecture**
-
-   - Control plane vs workers
-   - Queues
-   - Failure modes
-
-4. **Project Shogun — Repo & Folder Structure**
-
-   - Backend layout
-   - Outputs / logs
-   - Validation artifacts
-
-These will be created as **separate canvases**, each authoritative for its domain.
+**Retired:**
+- `platform-services/` — removed 2026-03-10. Services now owned by platform repo.
 
 ---
 
-## Operating Rule Going Forward
+## Milestone Status
 
-- Decisions land in canvas.
+| Milestone | Status | Notes |
+|:---|:---|:---|
+| MVP 1 — Telegram ingress validation | CLOSED | Telegram gateway live on platform |
+| MVP 2.1 — Platform infra + places DB | CLOSED | places-google on platform, DB schema stable |
+| MVP 2.2 — Geographic correctness | CLOSED | JP anchor logic + strict mode in shogun-places-ingester |
+| MVP 3 — shogun-core (control plane) | **IN PROGRESS** | Define and build shogun-core |
+
+---
+
+## Operating Rule
+
+- Decisions land here.
 - Exploration stays in chat.
-- Canvases are updated deliberately, not automatically.
+- This index is updated deliberately, not automatically.
+
+---
+
+## Directory Reference
+
+| Purpose | Path |
+|:---|:---|
+| Documentation | `c:\git\work\shogun\docs\` |
+| Application services | `c:\git\work\shogun\app-services\` |
+| Infrastructure | `c:\git\work\shogun\infra\` |
+| Platform repo | `c:\git\work\platform\` |
 
 *End of index.*
-
-document repo is for this and any other generated canvas document is c:\git\work\shogun\docs\
-other directories for code are c:\git\work\shogun\repo , infrastructure is c:\git\work\shogun\infra , platform services is c:\git\work\shogun\platform-services
-

@@ -85,8 +85,8 @@ class AppConfig:
     pg_user: str
     pg_password: str
 
-    # Google
-    google_api_key: str
+    # Gateway
+    gateway_url: str
 
     # Defaults for Places payload shaping
     default_lang: str = "en"
@@ -116,7 +116,7 @@ CONFIG = AppConfig(
     pg_database=_env("PGDATABASE"),
     pg_user=_env("PGUSER"),
     pg_password=_env("PGPASSWORD"),
-    google_api_key=_env("GOOGLE_PLACES_API_KEY"),
+    gateway_url=_env("PLACES_GATEWAY_URL", "http://places.platform.ibbytech.com").rstrip("/"),
 )
 
 
@@ -340,23 +340,18 @@ def load_seeds_from_disk() -> Dict[str, Any]:
 # ---------------------------------------------------------------------
 
 def google_geocode_address_jp(address: str) -> Dict[str, Any]:
-    """
-    Canonical anchor resolver for Japan neighborhoods.
-
-    Uses Google Geocoding API:
-      - components=country:JP  (hard restriction)
-      - region=JP              (bias)
-    """
-    url = "https://maps.googleapis.com/maps/api/geocode/json"
+    url = f"{CONFIG.gateway_url}/v1/places/geocode"
     params = {
         "address": address,
         "components": "country:JP",
         "region": "JP",
-        "key": CONFIG.google_api_key,
     }
     r = requests.get(url, params=params, timeout=20)
     r.raise_for_status()
-    return r.json()
+    resp = r.json()
+    if not resp.get("ok"):
+        raise RuntimeError(f"Gateway geocode failed: {resp.get('error')}")
+    return resp.get("data", {})
 
 
 def extract_geocode_best_result(geo_json: Dict[str, Any]) -> Tuple[float, float, str, Optional[str]]:
@@ -404,37 +399,22 @@ def google_places_text_search(
     region_code: str,
     language_code: str,
 ) -> Dict[str, Any]:
-    """
-    Places (New) text search.
-    IMPORTANT: We provide locationBias circle + regionCode.
-    This is not optional if you want "near my hotel".
-
-    Docs (conceptually): SearchText request body supports locationBias and regionCode.
-    """
-    url = f"{GOOGLE_PLACES_BASE}/places:searchText"
-
+    url = f"{CONFIG.gateway_url}/v1/places/search_text"
     body = {
-        "textQuery": text_query,
-        "maxResultCount": int(max_results),
-        "languageCode": language_code,
-        "regionCode": region_code,
-        "locationBias": {
-            "circle": {
-                "center": {"latitude": lat, "longitude": lng},
-                "radius": float(radius_m),
-            }
-        },
+        "text_query": text_query,
+        "lat": lat,
+        "lng": lng,
+        "radius_m": radius_m,
+        "max_results": max_results,
+        "region_code": region_code,
+        "language_code": language_code,
     }
-
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": CONFIG.google_api_key,
-        "X-Goog-FieldMask": CONFIG.nearby_fieldmask,
-    }
-
-    r = requests.post(url, headers=headers, json=body, timeout=30)
+    r = requests.post(url, json=body, timeout=30)
     r.raise_for_status()
-    return r.json()
+    resp = r.json()
+    if not resp.get("ok"):
+        raise RuntimeError(f"Gateway error: {resp.get('error')}")
+    return resp.get("data", {})
 
 
 def google_places_nearby_search(
@@ -446,53 +426,36 @@ def google_places_nearby_search(
     region_code: str,
     language_code: str,
 ) -> Dict[str, Any]:
-    """
-    Places (New) nearby search.
-    IMPORTANT: This uses locationRestriction circle (hard restriction).
-    """
-    url = f"{GOOGLE_PLACES_BASE}/places:searchNearby"
-
+    url = f"{CONFIG.gateway_url}/v1/places/nearby"
     body = {
-        "includedTypes": included_types,
-        "maxResultCount": int(max_results),
-        "languageCode": language_code,
-        "regionCode": region_code,
-        "locationRestriction": {
-            "circle": {
-                "center": {"latitude": lat, "longitude": lng},
-                "radius": float(radius_m),
-            }
-        },
+        "included_types": included_types,
+        "lat": lat,
+        "lng": lng,
+        "radius_m": radius_m,
+        "max_results": max_results,
+        "region_code": region_code,
+        "language_code": language_code,
     }
-
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": CONFIG.google_api_key,
-        "X-Goog-FieldMask": CONFIG.nearby_fieldmask,
-    }
-
-    r = requests.post(url, headers=headers, json=body, timeout=30)
+    r = requests.post(url, json=body, timeout=30)
     r.raise_for_status()
-    return r.json()
+    resp = r.json()
+    if not resp.get("ok"):
+        raise RuntimeError(f"Gateway error: {resp.get('error')}")
+    return resp.get("data", {})
 
 
 def google_places_details(place_id: str, language_code: str, region_code: str) -> Dict[str, Any]:
-    """
-    Place details. This is where we get paymentOptions, phone, website, opening hours, etc.
-    """
-    url = f"{GOOGLE_PLACES_BASE}/places/{place_id}"
+    url = f"{CONFIG.gateway_url}/v1/places/details/{place_id}"
     params = {
-        "languageCode": language_code,
-        "regionCode": region_code,
+        "language_code": language_code,
+        "region_code": region_code,
     }
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": CONFIG.google_api_key,
-        "X-Goog-FieldMask": CONFIG.details_fieldmask,
-    }
-    r = requests.get(url, headers=headers, params=params, timeout=30)
+    r = requests.get(url, params=params, timeout=30)
     r.raise_for_status()
-    return r.json()
+    resp = r.json()
+    if not resp.get("ok"):
+        raise RuntimeError(f"Gateway error: {resp.get('error')}")
+    return resp.get("data", {})
 
 
 def place_country_from_address_components(details_json: Dict[str, Any]) -> Optional[str]:
