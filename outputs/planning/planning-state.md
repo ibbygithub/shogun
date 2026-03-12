@@ -1,5 +1,5 @@
 # Planning State — Shogun
-Last updated: 2026-03-10
+Last updated: 2026-03-12
 
 ## Project Summary
 
@@ -14,17 +14,31 @@ Platform owns infrastructure; Shogun owns application logic.
 
 | Item | Description | Phase | Status | Last Updated |
 |------|-------------|-------|--------|--------------|
-| Valkey (Redis) | Add as shared platform service in platform repo | Platform Track 1 | Pending | 2026-03-10 |
-| shogun-core | Telegram control plane — movement logic, intent detection, LLM orchestration | MVP 3 | Pending | 2026-03-10 |
+| Claude Code foundation setup | .claude/CLAUDE.md, settings.json, foundation link established | Bootstrap | Complete | 2026-03-12 |
+| DNS Infrastructure | Configure nodes to use Pi-hole DNS + set FQDNs on all 3 nodes | Pre-MVP 3 | svcnode-01 done. dbnode-01/brainnode-01 owner-managed | 2026-03-10 |
+| Valkey (Redis) | Add as shared platform service in platform repo | Platform Track 1 | Ready | 2026-03-10 |
+| shogun-core | Telegram control plane — movement logic, intent detection, LLM orchestration | MVP 3 | Pending Valkey | 2026-03-10 |
 
 ## Open Decisions
 
-- **Valkey deployment:** Confirmed as shared platform service on svcnode-01. Awaiting execution.
-- **shogun-core FQDN:** Needs a hostname for the Telegram gateway's UPSTREAM_URL. Suggest `shogun.ibbytech.com` (app-layer, not platform-layer). Confirm before deployment.
-- **Conversation context TTL:** How long should conversation context persist in Valkey before expiring? (Suggestion: 24h idle TTL.)
-- **Location trigger threshold:** Exact radius in meters that triggers a recommendation. Canonical index says ~100m. Confirm.
-- **LLM model selection:** Which model handles intent detection + conversation for shogun-core? (Gemini 2.0 Flash is the platform default.)
-- **Postgres for shogun-core:** Does shogun-core need its own DB schema (for conversation history persistence, user prefs), or is Valkey sufficient for MVP?
+- **Valkey deployment:** Confirmed as shared platform service on svcnode-01. Awaiting DNS completion.
+- **shogun-core FQDN:** Will be `svcnode-01.ibbytech.com:8082` for internal access. Public FQDN (`shogun.ibbytech.com`) deferred until Cloudflare phase.
+- **Conversation context TTL:** Suggested 24h idle TTL. Pending confirmation.
+- **Location trigger threshold:** 150m + 5-minute cooldown (revised from 100m to account for GPS drift). Pending confirmation.
+- **LLM model:** Gemini 2.0 Flash confirmed.
+- **Postgres for shogun-core:** Valkey sufficient for MVP. Postgres conversation persistence is backlog.
+
+## DNS Infrastructure — Decision
+
+- **DNS manager on lab nodes:** systemd-resolved (confirmed active, /etc/resolv.conf is symlink)
+- **Current DNS:** 192.168.68.1 (router) → public DNS. Pi-holes (192.168.71.110, .115) NOT in use on lab nodes.
+- **Namecheap A records:** Point to private IPs (192.168.71.220). Resolution works today via public DNS chain.
+- **Decision:** Point all lab nodes at Pi-hole for DNS. Add local DNS records in Pi-hole for node FQDNs. Do NOT add node FQDNs to Namecheap (private IPs don't belong in public DNS).
+- **Node FQDNs to set:**
+  - svcnode-01 → 192.168.71.220
+  - dbnode-01 → 192.168.71.221
+  - brainnode-01 → 192.168.71.222
+- **Procedure:** Edit `/etc/systemd/resolved.conf` on each node (requires root). Awaiting `cat /etc/systemd/resolved.conf` + `resolvectl status` output from svcnode-01 before issuing exact commands.
 
 ## Technology Registry
 
@@ -38,6 +52,14 @@ Platform owns infrastructure; Shogun owns application logic.
 | LLM Gateway (platform) | Chat + intent detection | Platform service at llm.platform.ibbytech.com | 2026-03-10 |
 
 ## Decision Log
+
+### Google Places routing — 2026-03-12
+- Capability need: Canonical home for Google Places data
+- Decision: `platform_v1.places` is canonical. Shogun does NOT write place data
+  to shogun_v1. Reads via Google Places REST gateway only.
+- `shogun_v1.places` schema dropped 2026-03-12.
+- Tables: `google_places`, `google_place_snapshots`, `neighborhood_anchors` — all in platform_v1.
+- Risk accepted: None — Shogun was already using the gateway; no data lost (test data only).
 
 ### Platform-services removal — 2026-03-10
 - Capability need: Clarify what Shogun owns vs. what platform owns

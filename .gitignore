@@ -12,4 +12,7 @@ infra/platform/compose/certs/*
 
 # Agent / Claude tooling (local only)
 .agent/
-.claude/
+# Ignore .claude internals but track CLAUDE.md and settings.json
+.claude/worktrees/
+.claude/settings.local.json
+.claude/__pycache__/
