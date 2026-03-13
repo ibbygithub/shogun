@@ -22,7 +22,7 @@ Platform owns infrastructure; Shogun owns application logic.
 | Telegram gateway send API | POST /send + GET /health on port 3001. Auth via X-Send-Secret. | Platform Track 3 | Complete | 2026-03-13 |
 | shogun-core Phase 3 | FastAPI on brainnode-01, Gemini pipeline, user profiles, Valkey context | MVP 3 | Complete | 2026-03-13 |
 | Database schema (shogun_v1) | users, user_preferences, trip_itinerary, trip_pois. Todd seeded. | MVP 3 | Complete | 2026-03-13 |
-| shogun-core Phase 4 | Voice, photo, translation, location trigger, RAG pipeline | MVP 4 | Not started | 2026-03-13 |
+| shogun-core Phase 4 | Voice, photo, translation, location trigger, RAG pipeline | MVP 4 | Complete | 2026-03-13 |
 | Data ingest | Itinerary, POI by city, Madeline layer | MVP 5 | Not started | 2026-03-13 |
 | Printable itinerary | Standalone bilingual HTML — full trip details | MVP 6 | Not started | 2026-03-13 |
 
