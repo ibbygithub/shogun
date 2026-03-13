@@ -47,7 +47,7 @@ app = FastAPI(title="shogun-core", version="0.4.0", lifespan=lifespan)
 @app.get("/health")
 async def health():
     """Liveness check used by validate_shogun.py and monitoring."""
-    return {"ok": True, "service": "shogun-core", "version": "0.3.0"}
+    return {"ok": True, "service": "shogun-core", "version": "0.4.0"}
 
 
 @app.post("/telegram/events")
