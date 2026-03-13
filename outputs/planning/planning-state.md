@@ -15,18 +15,23 @@ Platform owns infrastructure; Shogun owns application logic.
 | Item | Description | Phase | Status | Last Updated |
 |------|-------------|-------|--------|--------------|
 | Claude Code foundation setup | .claude/CLAUDE.md, settings.json, foundation link established | Bootstrap | Complete | 2026-03-12 |
-| DNS Infrastructure | Configure nodes to use Pi-hole DNS + set FQDNs on all 3 nodes | Pre-MVP 3 | svcnode-01 done. dbnode-01/brainnode-01 owner-managed | 2026-03-10 |
-| Valkey (Redis) | Add as shared platform service in platform repo | Platform Track 1 | Ready | 2026-03-10 |
-| shogun-core | Telegram control plane — movement logic, intent detection, LLM orchestration | MVP 3 | Pending Valkey | 2026-03-10 |
+| Deploy branch resolution | feature/gateway-pure-search-endpoints merged to develop. develop branch established. | Bootstrap | Complete | 2026-03-12 |
+| DNS Infrastructure | All 3 nodes confirmed pointing at Pi-hole. valkey.platform.ibbytech.com resolves on all nodes. | Pre-MVP 3 | Complete | 2026-03-12 |
+| Valkey | Deployed on svcnode-01, 6/6 validation passing | Platform Track 1 | Complete | 2026-03-12 |
+| Tavily platform service | Web search (kanji + English), domain-restricted for Tabelog/Reddit | Platform Track 2 | Not started | 2026-03-12 |
+| shogun-core | Full Japan trip companion — see shogun-core-plan.md | MVP 3 | Planned | 2026-03-12 |
+| Database schema (shogun_v1) | users, user_preferences, trip_itinerary, trip_pois | MVP 3 | Not started | 2026-03-12 |
+| Data ingest | Itinerary, user profiles, POI by city, Madeline layer | MVP 3 | Not started | 2026-03-12 |
+| Printable itinerary | Standalone bilingual HTML — full trip details | MVP 3 | Not started | 2026-03-12 |
 
 ## Open Decisions
 
-- **Valkey deployment:** Confirmed as shared platform service on svcnode-01. Awaiting DNS completion.
+- **Valkey deployment:** ✅ Deployed 2026-03-12. DNS confirmed all nodes.
 - **shogun-core FQDN:** Will be `svcnode-01.ibbytech.com:8082` for internal access. Public FQDN (`shogun.ibbytech.com`) deferred until Cloudflare phase.
-- **Conversation context TTL:** Suggested 24h idle TTL. Pending confirmation.
-- **Location trigger threshold:** 150m + 5-minute cooldown (revised from 100m to account for GPS drift). Pending confirmation.
+- **Conversation context TTL:** ✅ 24h idle TTL confirmed 2026-03-12.
+- **User profile storage:** ✅ Confirmed 2026-03-12 — dietary, likes, dislikes stored as trip-long constants in shogun_v1 DB. Schema design pending.
+- **Location trigger threshold:** ✅ 150m + 5-minute cooldown confirmed 2026-03-12.
 - **LLM model:** Gemini 2.0 Flash confirmed.
-- **Postgres for shogun-core:** Valkey sufficient for MVP. Postgres conversation persistence is backlog.
 
 ## DNS Infrastructure — Decision
 
@@ -52,6 +57,36 @@ Platform owns infrastructure; Shogun owns application logic.
 | LLM Gateway (platform) | Chat + intent detection | Platform service at llm.platform.ibbytech.com | 2026-03-10 |
 
 ## Decision Log
+
+### Location trigger threshold — 2026-03-12
+- Capability need: When should Shogun trigger a new location-based recommendation
+- Decision: 150m radius + 5-minute cooldown
+- Reasoning: 150m covers 2-3 city blocks in central Tokyo — intentional movement,
+  not GPS drift. 5-minute cooldown prevents interruption spam while actively
+  exploring. Live Telegram location sharing means Shogun always has current position.
+- Risk accepted: Fast transitions (e.g., subway) may trigger on arrival at each
+  station. Acceptable — station areas are valid recommendation contexts.
+
+### Conversation context TTL — 2026-03-12
+- Capability need: How long to retain conversation context in Valkey
+- Decision: 24h idle TTL. Each message resets the TTL.
+- Reasoning: Live Telegram location sharing means location is never stale.
+  24h covers a full travel day including sleep. Preferences that are
+  trip-long constants (dietary, likes, dislikes) are stored in the DB,
+  not in Valkey — so expiry of Valkey context only loses conversation thread
+  history, not user preferences.
+- Risk accepted: A 25h+ silence mid-trip clears conversation thread history.
+  Acceptable — user restates context naturally in next message.
+
+### User profile storage — 2026-03-12
+- Capability need: Where to store dietary restrictions, likes, dislikes
+- Decision: shogun_v1 DB as trip-long constants. Not in Valkey TTL context.
+- Reasoning: These preferences are stable across a trip. Storing in Valkey
+  risks losing them on TTL expiry. DB is the right home for persistent
+  user-level data.
+- Schema needed: `users` and `user_preferences` tables in shogun_v1.public.
+  Design deferred to shogun-core build task.
+- Risk accepted: None — no existing schema to migrate.
 
 ### Google Places routing — 2026-03-12
 - Capability need: Canonical home for Google Places data

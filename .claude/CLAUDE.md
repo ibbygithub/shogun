@@ -17,9 +17,9 @@ Rules, behavioral directives, and skills are loaded from `../ibbytech-foundation
 - **Principle:** Shogun is the reference consumer of IbbyTech platform services.
   Every capability need is evaluated as a platform service first. Shogun owns
   application logic; platform owns infrastructure.
-- **Node (app):** svcnode-01 (192.168.71.220) — Docker containers — persona: devops-agent
+- **Node (app):** brainnode-01 (192.168.71.222) — shogun-core runs here as Python/systemd (no Docker). Application tier. Confirmed 2026-03-12.
+- **Node (platform):** svcnode-01 (192.168.71.220) — platform services only (gateways, Valkey, Traefik). Shogun consumes these via FQDN.
 - **Node (db):** dbnode-01 (192.168.71.221) — shogun_v1 database — persona: dba-agent
-- **brainnode-01:** Not yet onboarded — no Shogun workloads on this node yet.
 
 ---
 
@@ -31,9 +31,11 @@ Check `../platform/.claude/services/_index.md` before building anything new.
 |:--------|:-----|:---------|
 | Telegram Gateway | telegram.platform.ibbytech.com | Event ingress, bot interface |
 | Google Places Gateway | places.platform.ibbytech.com | Place discovery, neighborhood anchors |
-| LLM Gateway | llm.platform.ibbytech.com | Chat completions, intent detection |
-| Scraper | scrape.platform.ibbytech.com | Web content when needed |
+| LLM Gateway | llm.platform.ibbytech.com | Chat completions, intent detection (Gemini 2.0 Flash) |
+| Scraper | scrape.platform.ibbytech.com | Web content extraction via Firecrawl |
 | Reddit Gateway | reddit.platform.ibbytech.com | Available if Shogun needs Reddit data |
+| Valkey | valkey.platform.ibbytech.com:6379 | Conversation context, session state (24h TTL) |
+| Tavily | tavily.platform.ibbytech.com | Web search (kanji + English), Tabelog domain search. TAVILY_API_KEY required. |
 
 ---
 
@@ -49,14 +51,9 @@ Check `../platform/.claude/services/_index.md` before building anything new.
 
 ## Known Infrastructure State — Last Verified 2026-03-12
 
-- **svcnode-01 Shogun checkout:** Branch `feature/gateway-pure-search-endpoints`,
-  2 commits ahead of origin. Deploy branch state UNRESOLVED. Must resolve before
-  any new service is deployed from this branch.
-- **DNS Infrastructure:** svcnode-01 pointed at Pi-hole. dbnode-01 and brainnode-01
-  owner-managed (not yet updated). Node FQDNs: svcnode-01.ibbytech.com,
-  dbnode-01.ibbytech.com, brainnode-01.ibbytech.com.
-- **Valkey:** Confirmed as shared platform service, pending DNS completion before
-  shogun-core can be wired up.
+- **svcnode-01 Shogun checkout:** Merged to develop 2026-03-12. svcnode-01 updated to develop branch.
+- **DNS Infrastructure:** All 3 nodes confirmed pointing at Pi-hole. valkey.platform.ibbytech.com resolves on all nodes. Confirmed 2026-03-12.
+- **Valkey:** Deployed and validated 2026-03-12. 6/6 checks passing.
 - **shogun_v1 database:** Active. places schema DROPPED 2026-03-12.
   All place data now via platform_v1.places through REST gateway.
 - **mcp_shogun / mcp_group:** Dormant. MCP deployment deferred.
@@ -66,11 +63,12 @@ Check `../platform/.claude/services/_index.md` before building anything new.
 
 ## Open Architecture Decisions
 
-- **Deploy branch resolution:** svcnode-01 Shogun checkout is on
-  `feature/gateway-pure-search-endpoints` with 2 unmerged commits. Must decide:
-  merge to main, cherry-pick, or reset before any new deployment.
-- **Conversation context TTL:** 24h idle TTL suggested. Pending confirmation.
-- **Location trigger threshold:** 150m + 5-minute cooldown. Pending confirmation.
+- **Deploy branch resolution:** Merged to `develop` 2026-03-12. develop → main
+  promotion pending explicit instruction. svcnode-01 node checkout needs updating
+  after push — switch to develop or main on the node before next deployment.
+- **Conversation context TTL:** ✅ 24h idle TTL confirmed 2026-03-12.
+- **User profile storage:** ✅ Dietary, likes, dislikes → shogun_v1 DB (trip-long constants). Schema design pending for shogun-core build.
+- **Location trigger threshold:** ✅ 150m + 5-minute cooldown confirmed 2026-03-12.
 - **shogun-core FQDN:** `svcnode-01.ibbytech.com:8082` for internal access.
   Public FQDN (`shogun.ibbytech.com`) deferred until Cloudflare phase.
 - **MCP tool calling:** Deferred to OpenRouter planning session.
@@ -84,12 +82,13 @@ Check `../platform/.claude/services/_index.md` before building anything new.
 
 | Technology | Role | Rationale | Date |
 |------------|------|-----------|------|
-| Python / FastAPI | shogun-core application service | Platform standard; async-capable | 2026-03-10 |
-| Gemini 2.0 Flash | LLM completions, intent detection | Strong results, low cost, multimodal | 2026-03-09 |
-| Valkey 8.x | Shared session/state store | Apache 2.0, Redis-protocol-compatible | 2026-03-10 |
-| PostgreSQL 17 / shogun_v1 | Application database | Platform standard | 2026-02-15 |
-| Telegram bot | User interface | Low-friction family interface | 2026-03-09 |
-| Direct REST calls | Platform service consumption | No MCP adapter needed for MVP | 2026-03-09 |
+| Python / FastAPI | shogun-core application service on brainnode-01 (systemd, no Docker) | Platform standard; async-capable | 2026-03-10 |
+| Gemini 2.0 Flash | LLM completions, intent detection, vision, voice transcription | Multimodal — handles text, images, audio natively | 2026-03-09 |
+| Valkey 8.x | Conversation context per user (24h idle TTL) | Deployed 2026-03-12 | 2026-03-12 |
+| PostgreSQL 17 / shogun_v1 | User profiles, itinerary, trip POIs | Platform standard | 2026-02-15 |
+| Telegram bot | User interface — text, voice, photo, location | Low-friction family interface | 2026-03-09 |
+| Tavily | Web search platform service — kanji + English, domain-restricted for Tabelog | Standard API key (not MCP). Env var: TAVILY_API_KEY | 2026-03-12 |
+| Direct REST calls | Platform service consumption | MCP deferred post-trip. No MCP until post-MVP. | 2026-03-09 |
 
 ---
 
