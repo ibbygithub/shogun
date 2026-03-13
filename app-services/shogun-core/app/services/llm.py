@@ -67,8 +67,8 @@ async def chat(
             )
             resp.raise_for_status()
             data = resp.json()
-            # LLM gateway returns {"choices": [{"message": {"content": "..."}}], ...}
-            return data["choices"][0]["message"]["content"].strip()
+            # LLM gateway returns {"output_text": "...", "provider": ..., "model": ..., "usage": ...}
+            return data["output_text"].strip()
 
     except httpx.TimeoutException:
         logger.error("LLM gateway timeout after %.0fs", TIMEOUT)
