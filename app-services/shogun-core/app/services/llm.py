@@ -68,7 +68,11 @@ async def chat(
             resp.raise_for_status()
             data = resp.json()
             # LLM gateway returns {"output_text": "...", "provider": ..., "model": ..., "usage": ...}
-            return data["output_text"].strip()
+            text = data["output_text"].strip()
+            # Strip any role prefix Gemini occasionally prepends
+            if text.upper().startswith("ASSISTANT:"):
+                text = text[10:].lstrip()
+            return text
 
     except httpx.TimeoutException:
         logger.error("LLM gateway timeout after %.0fs", TIMEOUT)
