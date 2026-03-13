@@ -1,8 +1,12 @@
 """
-Valkey conversation context store.
-Key pattern: shogun:context:{telegram_user_id}
-TTL: 24h idle (reset on every message).
-Value: JSON list of {role, content} objects — the conversation history.
+Valkey store for shogun-core.
+
+Key patterns:
+  shogun:context:{uid}   — conversation history (list of {role, content})
+  shogun:location:{uid}  — last trigger location {lat, lng, ts}
+  shogun:translate:{uid} — translate mode flag (presence = active)
+
+All keys use a 24h idle TTL reset on each write.
 """
 import json
 import logging
@@ -13,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 CONTEXT_TTL = 86400  # 24 hours in seconds
 KEY_PREFIX = "shogun:context:"
+LOCATION_KEY_PREFIX = "shogun:location:"
+TRANSLATE_KEY_PREFIX = "shogun:translate:"
 
 
 def _client() -> redis.Redis:
@@ -58,3 +64,56 @@ def clear_context(telegram_user_id: int) -> None:
         r.delete(f"{KEY_PREFIX}{telegram_user_id}")
     except Exception as exc:
         logger.warning("Valkey clear_context failed for user %s: %s", telegram_user_id, exc)
+
+
+# ── Location state ─────────────────────────────────────────────────────────
+
+def get_location(telegram_user_id: int) -> dict | None:
+    """Return last trigger location {lat, lng, ts} or None."""
+    try:
+        r = _client()
+        raw = r.get(f"{LOCATION_KEY_PREFIX}{telegram_user_id}")
+        if not raw:
+            return None
+        return json.loads(raw)
+    except Exception as exc:
+        logger.warning("Valkey get_location failed for user %s: %s", telegram_user_id, exc)
+        return None
+
+
+def save_location(telegram_user_id: int, lat: float, lng: float, ts: int) -> None:
+    """Persist last trigger location and reset the 24h TTL."""
+    try:
+        r = _client()
+        r.setex(
+            f"{LOCATION_KEY_PREFIX}{telegram_user_id}",
+            CONTEXT_TTL,
+            json.dumps({"lat": lat, "lng": lng, "ts": ts}),
+        )
+    except Exception as exc:
+        logger.warning("Valkey save_location failed for user %s: %s", telegram_user_id, exc)
+
+
+# ── Translate mode ──────────────────────────────────────────────────────────
+
+def get_translate_mode(telegram_user_id: int) -> bool:
+    """Return True if translate mode is active for this user."""
+    try:
+        r = _client()
+        return r.exists(f"{TRANSLATE_KEY_PREFIX}{telegram_user_id}") > 0
+    except Exception as exc:
+        logger.warning("Valkey get_translate_mode failed for user %s: %s", telegram_user_id, exc)
+        return False
+
+
+def set_translate_mode(telegram_user_id: int, active: bool) -> None:
+    """Enable or disable translate mode. Uses key presence — no value stored."""
+    try:
+        r = _client()
+        key = f"{TRANSLATE_KEY_PREFIX}{telegram_user_id}"
+        if active:
+            r.setex(key, CONTEXT_TTL, "1")
+        else:
+            r.delete(key)
+    except Exception as exc:
+        logger.warning("Valkey set_translate_mode failed for user %s: %s", telegram_user_id, exc)

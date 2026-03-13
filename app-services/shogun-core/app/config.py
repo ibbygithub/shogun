@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     llm_gateway_url: str = "https://llm.platform.ibbytech.com"
     telegram_gateway_url: str = "http://platform-telegram-gateway:3001"
     telegram_send_secret: str
+    telegram_bot_token: str        # Used to download voice/photo files from Telegram
+    tavily_gateway_url: str = "https://tavily.platform.ibbytech.com"
+    scraper_gateway_url: str = "https://scrape.platform.ibbytech.com"
 
     # App
     app_host: str = "0.0.0.0"
