@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shogun Japan Trip — Preferences</title>
+  <style>
+    :root {
+      --ink:    #1a1a1a;
+      --soft:   #555;
+      --rule:   #e0e0e0;
+      --accent: #c0392b;
+      --bg:     #fafaf8;
+      --card:   #ffffff;
+      --check:  #2e7d32;
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.6;
+      padding: 16px;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      text-align: center;
+      padding: 32px 0 24px;
+      border-bottom: 2px solid var(--rule);
+      margin-bottom: 24px;
+    }
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    header p {
+      color: var(--soft);
+      margin-top: 6px;
+      font-size: 0.92rem;
+    }
+    .jp { font-size: 1.1rem; color: var(--accent); }
+
+    /* ── Person selector ─────────────────────────────────────────── */
+    #person-select {
+      background: var(--card);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    #person-select h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--soft); margin-bottom: 12px; }
+    .person-btn {
+      display: inline-block;
+      padding: 10px 22px;
+      margin: 4px 6px 4px 0;
+      border-radius: 24px;
+      border: 2px solid var(--rule);
+      background: var(--bg);
+      font-size: 0.95rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .person-btn:hover { border-color: var(--accent); }
+    .person-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .saved-badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      background: var(--check);
+      color: #fff;
+      border-radius: 10px;
+      padding: 1px 7px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    /* ── Section cards ───────────────────────────────────────────── */
+    .section {
+      background: var(--card);
+      border: 1px solid var(--rule);
+      border-radius: var(--radius);
+      padding: 20px 20px 16px;
+      margin-bottom: 16px;
+    }
+    .section h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-icon { font-size: 1.1rem; }
+    .section-sub {
+      font-size: 0.85rem;
+      color: var(--soft);
+      margin-bottom: 14px;
+    }
+
+    /* ── Options grid ────────────────────────────────────────────── */
+    .options {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .opt-label {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      cursor: pointer;
+      padding: 8px 10px;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      font-size: 0.88rem;
+      transition: border-color 0.12s, background 0.12s;
+      line-height: 1.4;
+    }
+    .opt-label:hover { border-color: #bbb; }
+    .opt-label input[type=checkbox] { margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); width: 15px; height: 15px; }
+    .opt-label.checked { border-color: var(--accent); background: #fdf5f4; }
+
+    /* ── Freeform ─────────────────────────────────────────────────── */
+    .freeform-label {
+      font-size: 0.82rem;
+      color: var(--soft);
+      margin-bottom: 5px;
+      display: block;
+    }
+    textarea {
+      width: 100%;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 0.88rem;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 68px;
+      background: var(--bg);
+      color: var(--ink);
+      transition: border-color 0.15s;
+    }
+    textarea:focus { outline: none; border-color: #aaa; }
+
+    /* ── Divider inside section ───────────────────────────────────── */
+    .section-rule { border: none; border-top: 1px solid var(--rule); margin: 14px 0; }
+
+    /* ── Pre-filled note ─────────────────────────────────────────── */
+    .prefilled {
+      background: #f0f7f0;
+      border: 1px solid #c8e6c9;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 0.84rem;
+      color: #2e7d32;
+      margin-bottom: 10px;
+    }
+    .prefilled strong { font-weight: 600; }
+
+    /* ── Action bar ─────────────────────────────────────────────── */
+    .action-bar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      padding-top: 16px;
+      border-top: 2px solid var(--rule);
+    }
+    button.primary, button.secondary {
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s;
+    }
+    button.primary { background: var(--accent); color: #fff; }
+    button.secondary { background: #444; color: #fff; }
+    button:hover { opacity: 0.85; }
+    button:active { opacity: 0.7; }
+
+    .toast {
+      display: none;
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #222;
+      color: #fff;
+      padding: 10px 22px;
+      border-radius: 20px;
+      font-size: 0.88rem;
+      z-index: 100;
+    }
+    .toast.show { display: block; }
+
+    /* ── Hidden sections ─────────────────────────────────────────── */
+    .form-body { display: none; }
+    .form-body.visible { display: block; }
+
+    .person-section { display: none; }
+    .person-section.visible { display: block; }
+
+    footer {
+      text-align: center;
+      color: var(--soft);
+      font-size: 0.78rem;
+      margin-top: 40px;
+      padding-bottom: 32px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="jp">将軍</div>
+  <h1>Japan Trip Preferences</h1>
+  <p>Your answers help Shogun give you better recommendations in Japan.<br>Takes about 3 minutes. You can come back and update anytime.</p>
+</header>
+
+<!-- Person selector -->
+<div id="person-select">
+  <h2>Who are you?</h2>
+  <button class="person-btn" data-person="brenda" onclick="selectPerson('brenda')">
+    Brenda <span id="badge-brenda" class="saved-badge" style="display:none">✓ saved</span>
+  </button>
+  <button class="person-btn" data-person="madeline" onclick="selectPerson('madeline')">
+    Madeline <span id="badge-madeline" class="saved-badge" style="display:none">✓ saved</span>
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ BRENDA ═══ -->
+<div id="form-brenda" class="form-body">
+
+  <div class="section person-section" id="brenda-dietary">
+    <h2><span class="section-icon">🍽️</span> Food &amp; Dining</h2>
+    <p class="section-sub">We've noted what we know — confirm or add more below.</p>
+
+    <div class="prefilled">
+      <strong>What we already know:</strong> You enjoy fish, seafood, dashi-based broths, beef broth soups, and vegetarian dishes. You prefer no red meat as a protein (pork, beef, lamb as main protein — broth is fine).
+    </div>
+
+    <p class="freeform-label">Any other dietary notes, restrictions, or things Shogun should know?</p>
+    <textarea id="brenda-dietary-notes" placeholder="e.g. allergies, things you love trying, any Japanese foods you're excited about…"></textarea>
+
+    <hr class="section-rule">
+
+    <p class="freeform-label">Japanese foods or dining experiences you're most excited about:</p>
+    <div class="options" id="brenda-food-opts">
+      <label class="opt-label"><input type="checkbox" value="kaiseki"> Kaiseki (multi-course)</label>
+      <label class="opt-label"><input type="checkbox" value="izakaya"> Izakaya (pub dining)</label>
+      <label class="opt-label"><input type="checkbox" value="street_food"> Street food / markets</label>
+      <label class="opt-label"><input type="checkbox" value="ramen"> Ramen</label>
+      <label class="opt-label"><input type="checkbox" value="sushi_omakase"> Sushi / Omakase</label>
+      <label class="opt-label"><input type="checkbox" value="tempura"> Tempura</label>
+      <label class="opt-label"><input type="checkbox" value="udon_soba"> Udon / Soba</label>
+      <label class="opt-label"><input type="checkbox" value="yakitori"> Yakitori</label>
+      <label class="opt-label"><input type="checkbox" value="wagashi"> Wagashi (traditional sweets)</label>
+      <label class="opt-label"><input type="checkbox" value="depachika"> Depachika (department store basement food)</label>
+    </div>
+    <p class="freeform-label">Other food interests or specific restaurants you want to visit:</p>
+    <textarea id="brenda-food-other" placeholder="Specific dishes, cuisines, or restaurants on your list…"></textarea>
+  </div>
+
+  <div class="section person-section" id="brenda-shopping">
+    <h2><span class="section-icon">🛍️</span> Shopping</h2>
+    <p class="section-sub">What are you hoping to bring home?</p>
+
+    <div class="options" id="brenda-shop-opts">
+      <label class="opt-label"><input type="checkbox" value="ceramics"> Ceramics / pottery</label>
+      <label class="opt-label"><input type="checkbox" value="textiles"> Textiles / fabric</label>
+      <label class="opt-label"><input type="checkbox" value="kitchen"> Kitchen / cookware</label>
+      <label class="opt-label"><input type="checkbox" value="lacquerware"> Lacquerware (urushi)</label>
+      <label class="opt-label"><input type="checkbox" value="cosmetics"> Beauty / cosmetics</label>
+      <label class="opt-label"><input type="checkbox" value="stationery"> Stationery / paper goods</label>
+      <label class="opt-label"><input type="checkbox" value="fashion"> Fashion / clothing</label>
+      <label class="opt-label"><input type="checkbox" value="artisan"> Artisan / handmade goods</label>
+      <label class="opt-label"><input type="checkbox" value="food_gifts"> Food gifts / omiyage</label>
+      <label class="opt-label"><input type="checkbox" value="books"> Books / magazines</label>
+      <label class="opt-label"><input type="checkbox" value="jewelry"> Jewellery / accessories</label>
+      <label class="opt-label"><input type="checkbox" value="plants"> Plants / ikebana / bonsai</label>
+    </div>
+
+    <p class="freeform-label">Anything specific — particular items, makers, districts, or stores:</p>
+    <textarea id="brenda-shop-notes" placeholder="e.g. specific pottery styles, a particular brand, a market you've heard about…"></textarea>
+  </div>
+
+  <div class="section person-section" id="brenda-sights">
+    <h2><span class="section-icon">⛩️</span> Sights &amp; Activities</h2>
+    <p class="section-sub">What kinds of experiences matter most to you?</p>
+
+    <div class="options" id="brenda-sight-opts">
+      <label class="opt-label"><input type="checkbox" value="shrines_temples"> Shrines &amp; temples</label>
+      <label class="opt-label"><input type="checkbox" value="gardens"> Traditional gardens</label>
+      <label class="opt-label"><input type="checkbox" value="local_neighborhoods"> Local neighborhoods (off tourist trail)</label>
+      <label class="opt-label"><input type="checkbox" value="markets"> Markets &amp; shotengai</label>
+      <label class="opt-label"><input type="checkbox" value="art_museums"> Art &amp; design museums</label>
+      <label class="opt-label"><input type="checkbox" value="history"> Historical sites</label>
+      <label class="opt-label"><input type="checkbox" value="nature"> Nature / parks</label>
+      <label class="opt-label"><input type="checkbox" value="architecture"> Architecture</label>
+      <label class="opt-label"><input type="checkbox" value="tea_ceremony"> Tea ceremony / cultural experiences</label>
+      <label class="opt-label"><input type="checkbox" value="cooking_class"> Cooking class</label>
+      <label class="opt-label"><input type="checkbox" value="onsen"> Onsen / bathhouse</label>
+    </div>
+
+    <p class="freeform-label">Anything specific you want to make sure we don't miss:</p>
+    <textarea id="brenda-sight-notes" placeholder="e.g. "I really want to find a proper local coffee shop in each city" or "want to see cherry blossoms at a quiet spot, not a tourist spot"…"></textarea>
+  </div>
+
+  <div class="section person-section" id="brenda-other">
+    <h2><span class="section-icon">💬</span> Anything Else?</h2>
+    <p class="section-sub">Anything Shogun should know about how you like to travel, pace of day, or what makes a great trip day for you.</p>
+    <textarea id="brenda-other-notes" placeholder="e.g. "I love slow mornings", "I want at least one full free afternoon in Kanazawa", "don't over-schedule — leave room to wander"…"></textarea>
+  </div>
+
+</div><!-- /form-brenda -->
+
+
+<!-- ═══════════════════════════════════════════════════════ MADELINE ═══ -->
+<div id="form-madeline" class="form-body">
+
+  <div class="section person-section" id="madeline-anime">
+    <h2><span class="section-icon">🎌</span> Anime &amp; Manga</h2>
+    <p class="section-sub">This directly affects what Shogun loads for Ikebukuro, Akihabara, and Nakano Broadway. The more specific the better.</p>
+
+    <p class="freeform-label">Which franchises are you most into right now? (beyond Ghibli — that's already covered)</p>
+    <div class="options" id="madeline-franchise-opts">
+      <label class="opt-label"><input type="checkbox" value="one_piece"> One Piece</label>
+      <label class="opt-label"><input type="checkbox" value="naruto"> Naruto / Boruto</label>
+      <label class="opt-label"><input type="checkbox" value="demon_slayer"> Demon Slayer (鬼滅の刃)</label>
+      <label class="opt-label"><input type="checkbox" value="my_hero"> My Hero Academia</label>
+      <label class="opt-label"><input type="checkbox" value="jjk"> Jujutsu Kaisen</label>
+      <label class="opt-label"><input type="checkbox" value="attack_on_titan"> Attack on Titan</label>
+      <label class="opt-label"><input type="checkbox" value="sword_art"> Sword Art Online</label>
+      <label class="opt-label"><input type="checkbox" value="sailor_moon"> Sailor Moon</label>
+      <label class="opt-label"><input type="checkbox" value="cardcaptor"> Cardcaptor Sakura</label>
+      <label class="opt-label"><input type="checkbox" value="fruits_basket"> Fruits Basket</label>
+      <label class="opt-label"><input type="checkbox" value="fullmetal"> Fullmetal Alchemist</label>
+      <label class="opt-label"><input type="checkbox" value="haikyuu"> Haikyuu!!</label>
+      <label class="opt-label"><input type="checkbox" value="blue_lock"> Blue Lock</label>
+      <label class="opt-label"><input type="checkbox" value="bocchi"> Bocchi the Rock!</label>
+      <label class="opt-label"><input type="checkbox" value="oshi_no_ko"> Oshi no Ko</label>
+      <label class="opt-label"><input type="checkbox" value="spy_family"> Spy x Family</label>
+      <label class="opt-label"><input type="checkbox" value="vinland"> Vinland Saga</label>
+      <label class="opt-label"><input type="checkbox" value="bleach"> Bleach</label>
+    </div>
+    <p class="freeform-label">Others not listed, including manga, webtoons, or specific characters:</p>
+    <textarea id="madeline-franchise-other" placeholder="Anything not in the list above. Specific characters you want merch for? (e.g. "I specifically want Nezuko stuff")…"></textarea>
+
+    <hr class="section-rule">
+
+    <p class="freeform-label">What kind of anime/manga stuff are you hoping to buy?</p>
+    <div class="options" id="madeline-merch-opts">
+      <label class="opt-label"><input type="checkbox" value="figures_new"> Figures (new / boxed)</label>
+      <label class="opt-label"><input type="checkbox" value="figures_vintage"> Vintage / used figures</label>
+      <label class="opt-label"><input type="checkbox" value="plush"> Plushies</label>
+      <label class="opt-label"><input type="checkbox" value="apparel"> Clothing / apparel</label>
+      <label class="opt-label"><input type="checkbox" value="art_prints"> Art prints / posters</label>
+      <label class="opt-label"><input type="checkbox" value="manga_books"> Manga volumes (Japanese)</label>
+      <label class="opt-label"><input type="checkbox" value="stationery_anime"> Stationery / notebooks</label>
+      <label class="opt-label"><input type="checkbox" value="keychains"> Keychains / pins / accessories</label>
+      <label class="opt-label"><input type="checkbox" value="gacha"> Gacha / capsule toys</label>
+    </div>
+    <p class="freeform-label">Any specific items you're on a mission to find:</p>
+    <textarea id="madeline-merch-notes" placeholder="e.g. "a specific figure I've been looking for", "Ghibli plushies at the Mitaka museum shop"…"></textarea>
+  </div>
+
+  <div class="section person-section" id="madeline-gaming">
+    <h2><span class="section-icon">🎮</span> Gaming</h2>
+    <p class="section-sub">Akihabara and Nakano Broadway have great retro selections.</p>
+
+    <p class="freeform-label">What kinds of games or consoles are you interested in?</p>
+    <div class="options" id="madeline-gaming-opts">
+      <label class="opt-label"><input type="checkbox" value="gameboy"> Game Boy / Game Boy Advance</label>
+      <label class="opt-label"><input type="checkbox" value="ds"> Nintendo DS / 3DS</label>
+      <label class="opt-label"><input type="checkbox" value="switch"> Switch games (Japanese exclusives)</label>
+      <label class="opt-label"><input type="checkbox" value="psp"> PSP / PS Vita</label>
+      <label class="opt-label"><input type="checkbox" value="retro_snes"> SNES / Famicom era retro</label>
+      <label class="opt-label"><input type="checkbox" value="pokemon"> Pokémon (games / cards / merch)</label>
+      <label class="opt-label"><input type="checkbox" value="animal_crossing"> Animal Crossing</label>
+      <label class="opt-label"><input type="checkbox" value="rhythm_games"> Rhythm games / arcade</label>
+    </div>
+
+    <p class="freeform-label">Specific games, systems, or things you're looking for:</p>
+    <textarea id="madeline-gaming-notes" placeholder="e.g. specific titles, limited editions, Japanese-only releases you want to find…"></textarea>
+  </div>
+
+  <div class="section person-section" id="madeline-fashion">
+    <h2><span class="section-icon">👗</span> Fashion &amp; Style</h2>
+    <p class="section-sub">Harajuku Takeshita Street, Shimokitazawa vintage, and Nakano Broadway all have different vibes.</p>
+
+    <p class="freeform-label">What kind of clothing/style are you shopping for?</p>
+    <div class="options" id="madeline-fashion-opts">
+      <label class="opt-label"><input type="checkbox" value="vintage_used"> Vintage / used clothing</label>
+      <label class="opt-label"><input type="checkbox" value="harajuku_alt"> Harajuku / alternative style</label>
+      <label class="opt-label"><input type="checkbox" value="streetwear"> Streetwear</label>
+      <label class="opt-label"><input type="checkbox" value="thrift"> Thrift / secondhand</label>
+      <label class="opt-label"><input type="checkbox" value="anime_apparel"> Anime-themed clothing</label>
+      <label class="opt-label"><input type="checkbox" value="accessories"> Accessories / jewellery</label>
+    </div>
+
+    <p class="freeform-label">Anything specific — styles, colours, brands, or items you want to find:</p>
+    <textarea id="madeline-fashion-notes" placeholder="e.g. "looking for vintage band tees", "specific brand I want to check out", "I want to find something in Shimokitazawa"…"></textarea>
+  </div>
+
+  <div class="section person-section" id="madeline-food">
+    <h2><span class="section-icon">🍱</span> Food</h2>
+    <p class="section-sub">Shogun already knows you love chicken katsu, eat beef, and prefer no fish. Anything else to add?</p>
+
+    <div class="prefilled">
+      <strong>Already noted:</strong> Chicken katsu is your favourite. You eat beef. No fish.
+    </div>
+
+    <p class="freeform-label">Other Japanese foods you want to try:</p>
+    <div class="options" id="madeline-food-opts">
+      <label class="opt-label"><input type="checkbox" value="gyudon"> Gyudon (beef rice bowl)</label>
+      <label class="opt-label"><input type="checkbox" value="tonkatsu"> Tonkatsu</label>
+      <label class="opt-label"><input type="checkbox" value="ramen_chicken"> Chicken ramen</label>
+      <label class="opt-label"><input type="checkbox" value="karaage"> Karaage (fried chicken)</label>
+      <label class="opt-label"><input type="checkbox" value="yakitori"> Yakitori</label>
+      <label class="opt-label"><input type="checkbox" value="curry"> Japanese curry</label>
+      <label class="opt-label"><input type="checkbox" value="onigiri"> Onigiri / convenience food</label>
+      <label class="opt-label"><input type="checkbox" value="crepes"> Harajuku crepes</label>
+      <label class="opt-label"><input type="checkbox" value="sweets"> Japanese sweets / mochi</label>
+    </div>
+
+    <p class="freeform-label">Anything else about food — places you've heard of, things you want to try:</p>
+    <textarea id="madeline-food-notes" placeholder="e.g. "I want to find a really good katsu place in Osaka", "want to try convenience store breakfast"…"></textarea>
+  </div>
+
+  <div class="section person-section" id="madeline-other">
+    <h2><span class="section-icon">💬</span> Anything Else?</h2>
+    <p class="section-sub">What would make this trip amazing for you? Activities, places, experiences — anything Shogun should know.</p>
+    <textarea id="madeline-other-notes" placeholder="e.g. specific things you want to do, places you've wanted to visit, vibes you're going for on this trip…"></textarea>
+  </div>
+
+</div><!-- /form-madeline -->
+
+<!-- Action bar (shown when a person is selected) -->
+<div id="action-bar" class="action-bar" style="display:none">
+  <button class="primary" onclick="saveAnswers()">💾 Save answers</button>
+  <button class="secondary" onclick="exportJSON()">⬇ Export JSON</button>
+</div>
+
+<footer>
+  Answers are saved on this device. Use Export JSON to hand them off for loading into Shogun's database.
+</footer>
+
+<div id="toast" class="toast"></div>
+
+<script>
+  let currentPerson = null;
+
+  // ── Checkbox visual state ──────────────────────────────────────────────────
+  document.querySelectorAll('.opt-label input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('.opt-label').classList.toggle('checked', cb.checked);
+    });
+  });
+
+  // ── Person selection ───────────────────────────────────────────────────────
+  function selectPerson(person) {
+    currentPerson = person;
+
+    document.querySelectorAll('.person-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`[data-person="${person}"]`).classList.add('active');
+
+    document.querySelectorAll('.form-body').forEach(f => f.classList.remove('visible'));
+    document.getElementById(`form-${person}`).classList.add('visible');
+
+    document.getElementById('action-bar').style.display = 'flex';
+
+    loadAnswers(person);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ── Save ───────────────────────────────────────────────────────────────────
+  function saveAnswers() {
+    if (!currentPerson) return;
+
+    const data = collectFormData(currentPerson);
+    localStorage.setItem(`shogun_prefs_${currentPerson}`, JSON.stringify(data));
+
+    // Show saved badge
+    const badge = document.getElementById(`badge-${currentPerson}`);
+    badge.style.display = 'inline-block';
+
+    showToast('Answers saved ✓');
+  }
+
+  // ── Load ───────────────────────────────────────────────────────────────────
+  function loadAnswers(person) {
+    const raw = localStorage.getItem(`shogun_prefs_${person}`);
+    if (!raw) return;
+
+    try {
+      const data = JSON.parse(raw);
+      const form = document.getElementById(`form-${person}`);
+
+      // Restore checkboxes
+      (data.checkboxes || []).forEach(val => {
+        const cb = form.querySelector(`input[value="${val}"]`);
+        if (cb) {
+          cb.checked = true;
+          cb.closest('.opt-label').classList.add('checked');
+        }
+      });
+
+      // Restore textareas
+      Object.entries(data.text || {}).forEach(([id, val]) => {
+        const el = document.getElementById(id);
+        if (el) el.value = val;
+      });
+
+      // Show saved badge
+      document.getElementById(`badge-${person}`).style.display = 'inline-block';
+    } catch(e) {
+      console.warn('Could not load saved data:', e);
+    }
+  }
+
+  // ── Collect form data ─────────────────────────────────────────────────────
+  function collectFormData(person) {
+    const form = document.getElementById(`form-${person}`);
+
+    const checkboxes = Array.from(form.querySelectorAll('input[type=checkbox]:checked'))
+      .map(cb => cb.value);
+
+    const text = {};
+    form.querySelectorAll('textarea').forEach(ta => {
+      if (ta.value.trim()) text[ta.id] = ta.value.trim();
+    });
+
+    return {
+      person,
+      saved_at: new Date().toISOString(),
+      checkboxes,
+      text
+    };
+  }
+
+  // ── Export JSON ────────────────────────────────────────────────────────────
+  function exportJSON() {
+    if (!currentPerson) return;
+
+    const data = collectFormData(currentPerson);
+
+    // Structure for DB ingest
+    const structured = buildStructuredPrefs(currentPerson, data);
+
+    const blob = new Blob([JSON.stringify(structured, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `shogun-prefs-${currentPerson}-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showToast('JSON exported ✓');
+  }
+
+  // ── Build structured output for DB ingest ────────────────────────────────
+  // Maps raw form data to the user_preferences table structure:
+  // { user, category, preference_key, preference_value, notes }
+
+  function buildStructuredPrefs(person, data) {
+    const rows = [];
+
+    if (person === 'brenda') {
+      // Dietary
+      const foodChecked = data.checkboxes.filter(v => ['kaiseki','izakaya','street_food','ramen','sushi_omakase','tempura','udon_soba','yakitori','wagashi','depachika'].includes(v));
+      foodChecked.forEach(v => rows.push({ category: 'likes', preference_key: 'cuisine_interest', preference_value: v }));
+      if (data.text['brenda-dietary-notes']) rows.push({ category: 'dietary', preference_key: 'notes', preference_value: data.text['brenda-dietary-notes'] });
+      if (data.text['brenda-food-other'])    rows.push({ category: 'likes',   preference_key: 'food_freeform', preference_value: data.text['brenda-food-other'] });
+
+      // Shopping
+      const shopChecked = data.checkboxes.filter(v => ['ceramics','textiles','kitchen','lacquerware','cosmetics','stationery','fashion','artisan','food_gifts','books','jewelry','plants'].includes(v));
+      shopChecked.forEach(v => rows.push({ category: 'shopping', preference_key: 'interest', preference_value: v }));
+      if (data.text['brenda-shop-notes']) rows.push({ category: 'shopping', preference_key: 'notes', preference_value: data.text['brenda-shop-notes'] });
+
+      // Sights
+      const sightChecked = data.checkboxes.filter(v => ['shrines_temples','gardens','local_neighborhoods','markets','art_museums','history','nature','architecture','tea_ceremony','cooking_class','onsen'].includes(v));
+      sightChecked.forEach(v => rows.push({ category: 'entertainment', preference_key: 'activity_interest', preference_value: v }));
+      if (data.text['brenda-sight-notes']) rows.push({ category: 'entertainment', preference_key: 'notes', preference_value: data.text['brenda-sight-notes'] });
+
+      // Other
+      if (data.text['brenda-other-notes']) rows.push({ category: 'likes', preference_key: 'travel_style', preference_value: data.text['brenda-other-notes'] });
+
+    } else if (person === 'madeline') {
+      // Anime franchises
+      const franchises = data.checkboxes.filter(v => ['one_piece','naruto','demon_slayer','my_hero','jjk','attack_on_titan','sword_art','sailor_moon','cardcaptor','fruits_basket','fullmetal','haikyuu','blue_lock','bocchi','oshi_no_ko','spy_family','vinland','bleach'].includes(v));
+      franchises.forEach(v => rows.push({ category: 'entertainment', preference_key: 'anime_franchise', preference_value: v }));
+      if (data.text['madeline-franchise-other']) rows.push({ category: 'entertainment', preference_key: 'anime_freeform', preference_value: data.text['madeline-franchise-other'] });
+
+      // Merch
+      const merch = data.checkboxes.filter(v => ['figures_new','figures_vintage','plush','apparel','art_prints','manga_books','stationery_anime','keychains','gacha'].includes(v));
+      merch.forEach(v => rows.push({ category: 'shopping', preference_key: 'anime_merch_type', preference_value: v }));
+      if (data.text['madeline-merch-notes']) rows.push({ category: 'shopping', preference_key: 'anime_merch_notes', preference_value: data.text['madeline-merch-notes'] });
+
+      // Gaming
+      const gaming = data.checkboxes.filter(v => ['gameboy','ds','switch','psp','retro_snes','pokemon','animal_crossing','rhythm_games'].includes(v));
+      gaming.forEach(v => rows.push({ category: 'entertainment', preference_key: 'gaming_interest', preference_value: v }));
+      if (data.text['madeline-gaming-notes']) rows.push({ category: 'entertainment', preference_key: 'gaming_notes', preference_value: data.text['madeline-gaming-notes'] });
+
+      // Fashion
+      const fashion = data.checkboxes.filter(v => ['vintage_used','harajuku_alt','streetwear','thrift','anime_apparel','accessories'].includes(v));
+      fashion.forEach(v => rows.push({ category: 'shopping', preference_key: 'fashion_interest', preference_value: v }));
+      if (data.text['madeline-fashion-notes']) rows.push({ category: 'shopping', preference_key: 'fashion_notes', preference_value: data.text['madeline-fashion-notes'] });
+
+      // Food
+      const food = data.checkboxes.filter(v => ['gyudon','tonkatsu','ramen_chicken','karaage','yakitori','curry','onigiri','crepes','sweets'].includes(v));
+      food.forEach(v => rows.push({ category: 'likes', preference_key: 'food_interest', preference_value: v }));
+      if (data.text['madeline-food-notes']) rows.push({ category: 'likes', preference_key: 'food_notes', preference_value: data.text['madeline-food-notes'] });
+
+      // Other
+      if (data.text['madeline-other-notes']) rows.push({ category: 'likes', preference_key: 'trip_notes', preference_value: data.text['madeline-other-notes'] });
+    }
+
+    return {
+      person,
+      display_name: person.charAt(0).toUpperCase() + person.slice(1),
+      exported_at: new Date().toISOString(),
+      preferences: rows
+    };
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  // ── Init: show saved badges if data exists ────────────────────────────────
+  ['brenda', 'madeline'].forEach(p => {
+    if (localStorage.getItem(`shogun_prefs_${p}`)) {
+      document.getElementById(`badge-${p}`).style.display = 'inline-block';
+    }
+  });
+</script>
+</body>
+</html>
