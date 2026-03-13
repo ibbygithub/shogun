@@ -68,6 +68,27 @@ def get_todays_itinerary(date_local: str) -> list[dict]:
         conn.close()
 
 
+def get_city_for_date(date_local: str) -> str | None:
+    """
+    Return the base city for a given date by finding the most recent
+    accommodation leg on or before that date.
+    Returns None if no accommodation is found (pre-trip or post-trip).
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT city FROM trip_itinerary "
+                "WHERE leg_type = 'accommodation' AND date_local <= %s "
+                "ORDER BY date_local DESC LIMIT 1",
+                (date_local,),
+            )
+            row = cur.fetchone()
+            return row["city"] if row else None
+    finally:
+        conn.close()
+
+
 def get_pois_by_city(city: str, category: str | None = None) -> list[dict]:
     """Return trip_pois for a city, optionally filtered by category."""
     conn = get_connection()
