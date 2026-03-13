@@ -26,8 +26,8 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
     if not user:
         return None
 
-    # Telegram sends multiple photo sizes — last entry is the largest
-    photos = envelope.payload.get("photo") or []
+    # Gateway sends payload.photos (array of sizes) — last entry is the largest
+    photos = envelope.payload.get("photos") or []
     if not photos:
         return "Photo received but I couldn't read it. Please try again."
 
