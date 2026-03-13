@@ -1,5 +1,5 @@
 # Planning State — Shogun
-Last updated: 2026-03-12
+Last updated: 2026-03-13
 
 ## Project Summary
 
@@ -18,11 +18,13 @@ Platform owns infrastructure; Shogun owns application logic.
 | Deploy branch resolution | feature/gateway-pure-search-endpoints merged to develop. develop branch established. | Bootstrap | Complete | 2026-03-12 |
 | DNS Infrastructure | All 3 nodes confirmed pointing at Pi-hole. valkey.platform.ibbytech.com resolves on all nodes. | Pre-MVP 3 | Complete | 2026-03-12 |
 | Valkey | Deployed on svcnode-01, 6/6 validation passing | Platform Track 1 | Complete | 2026-03-12 |
-| Tavily platform service | Web search (kanji + English), domain-restricted for Tabelog/Reddit | Platform Track 2 | Not started | 2026-03-12 |
-| shogun-core | Full Japan trip companion — see shogun-core-plan.md | MVP 3 | Planned | 2026-03-12 |
-| Database schema (shogun_v1) | users, user_preferences, trip_itinerary, trip_pois | MVP 3 | Not started | 2026-03-12 |
-| Data ingest | Itinerary, user profiles, POI by city, Madeline layer | MVP 3 | Not started | 2026-03-12 |
-| Printable itinerary | Standalone bilingual HTML — full trip details | MVP 3 | Not started | 2026-03-12 |
+| Tavily platform service | Web search (kanji + English), domain-restricted for Tabelog/Reddit | Platform Track 2 | Complete | 2026-03-13 |
+| Telegram gateway send API | POST /send + GET /health on port 3001. Auth via X-Send-Secret. | Platform Track 3 | Complete | 2026-03-13 |
+| shogun-core Phase 3 | FastAPI on brainnode-01, Gemini pipeline, user profiles, Valkey context | MVP 3 | Complete | 2026-03-13 |
+| Database schema (shogun_v1) | users, user_preferences, trip_itinerary, trip_pois. Todd seeded. | MVP 3 | Complete | 2026-03-13 |
+| shogun-core Phase 4 | Voice, photo, translation, location trigger, RAG pipeline | MVP 4 | Not started | 2026-03-13 |
+| Data ingest | Itinerary, POI by city, Madeline layer | MVP 5 | Not started | 2026-03-13 |
+| Printable itinerary | Standalone bilingual HTML — full trip details | MVP 6 | Not started | 2026-03-13 |
 
 ## Open Decisions
 
