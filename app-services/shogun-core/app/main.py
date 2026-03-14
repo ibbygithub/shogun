@@ -15,6 +15,8 @@ from app.models import TelegramEnvelope
 from app import db, valkey_client
 from app.handlers import text as text_handler
 from app.handlers import location as location_handler
+from app.handlers import voice as voice_handler
+from app.handlers import photo as photo_handler
 from app.handlers import media as media_handler
 
 logging.basicConfig(
@@ -39,13 +41,13 @@ async def lifespan(app: FastAPI):
     logger.info("shogun-core shutting down")
 
 
-app = FastAPI(title="shogun-core", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="shogun-core", version="0.4.0", lifespan=lifespan)
 
 
 @app.get("/health")
 async def health():
     """Liveness check used by validate_shogun.py and monitoring."""
-    return {"ok": True, "service": "shogun-core", "version": "0.3.0"}
+    return {"ok": True, "service": "shogun-core", "version": "0.4.0"}
 
 
 @app.post("/telegram/events")
@@ -90,9 +92,9 @@ async def telegram_events(request: Request):
         elif kind == "location":
             reply_text = await location_handler.handle(envelope, user, prefs)
         elif kind == "photo":
-            reply_text = await media_handler.handle_photo(envelope, user, prefs)
+            reply_text = await photo_handler.handle(envelope, user, prefs)
         elif kind == "voice":
-            reply_text = await media_handler.handle_voice(envelope, user, prefs)
+            reply_text = await voice_handler.handle(envelope, user, prefs)
         elif kind == "document":
             reply_text = await media_handler.handle_document(envelope, user, prefs)
         else:

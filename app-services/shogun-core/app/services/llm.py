@@ -4,7 +4,11 @@ Uses Gemini 2.0 Flash (platform default).
 """
 import logging
 import httpx
+from datetime import datetime, timezone, timedelta
 from app.config import settings
+
+# Japan Standard Time — used to derive "today" for trip context
+_JST = timezone(timedelta(hours=9))
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +16,13 @@ TIMEOUT = 25.0  # Must complete before Telegram gateway times out (~30s)
 
 
 def build_system_prompt(user: dict | None, prefs: list[dict]) -> str:
-    """Build a system prompt from user profile and preferences."""
+    """
+    Build a system prompt from user profile, preferences, and today's trip context.
+    Loads today's itinerary and city POIs from DB automatically.
+    """
+    # Import here to avoid circular imports at module load time
+    from app import db
+
     lines = [
         "You are Shogun, an expert Japan travel concierge for the Ibbotson family.",
         "You have 10 years of living experience in Japan. You know crowd patterns,",
@@ -27,17 +37,44 @@ def build_system_prompt(user: dict | None, prefs: list[dict]) -> str:
         lines.append(f"You are speaking with {user['display_name']}.")
 
     if prefs:
-        # Group preferences by category for readability
         by_cat: dict[str, list[str]] = {}
         for p in prefs:
             cat = p["category"]
             val = p["preference_value"]
             note = f" ({p['notes']})" if p.get("notes") else ""
             by_cat.setdefault(cat, []).append(f"{p['preference_key']}: {val}{note}")
-
         lines.append("User profile:")
         for cat, entries in by_cat.items():
             lines.append(f"  {cat}: {', '.join(entries)}")
+
+    # ── Trip context (itinerary + city POIs) ──────────────────────────────
+    try:
+        today_jst = datetime.now(_JST).strftime("%Y-%m-%d")
+        itinerary = db.get_todays_itinerary(today_jst)
+        city = db.get_city_for_date(today_jst)
+
+        if itinerary:
+            lines.append("")
+            lines.append(f"Today ({today_jst} JST) — itinerary:")
+            for leg in itinerary:
+                time_str = f" {leg['start_time']}" if leg.get("start_time") else ""
+                note_str = f" — {leg['notes_en'][:120]}" if leg.get("notes_en") else ""
+                lines.append(f"  • [{leg['leg_type']}]{time_str} {leg['title']}{note_str}")
+
+        if city:
+            pois = db.get_pois_by_city(city.lower())
+            if pois:
+                lines.append("")
+                lines.append(f"Key spots in {city} (from pre-loaded intelligence):")
+                for poi in pois[:8]:  # cap at 8 to stay within reasonable token budget
+                    timing = poi.get("best_time_notes", "")
+                    crowd = poi.get("crowd_notes", "")
+                    detail = timing or crowd
+                    suffix = f" — {detail[:100]}" if detail else ""
+                    lines.append(f"  • {poi['name_en']}{suffix}")
+
+    except Exception as exc:
+        logger.warning("Failed to load trip context for system prompt: %s", exc)
 
     return "\n".join(lines)
 
