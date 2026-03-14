@@ -1,5 +1,9 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
+# NEXT_PUBLIC_API_URL is a build-time value — Next.js compiles rewrite destinations
+# into the server bundle, so it must be injected as a build ARG, not a runtime ENV.
+ARG NEXT_PUBLIC_API_URL=http://shogun-web-api:8090
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 COPY package.json ./
 RUN npm install
 COPY . .

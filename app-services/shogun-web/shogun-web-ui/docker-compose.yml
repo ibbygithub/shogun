@@ -2,12 +2,18 @@ version: "3.9"
 
 services:
   shogun-web-ui:
-    build: .
+    build:
+      context: .
+      args:
+        - NEXT_PUBLIC_API_URL=http://shogun-web-api:8090
     container_name: shogun-web-ui
     restart: unless-stopped
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://shogun-api.ibbytech.com
+    extra_hosts:
+      # Allows the Next.js server (inside container) to resolve shogun-api.ibbytech.com
+      # without requiring a Pi-hole DNS entry. Routes via Traefik on svcnode-01.
+      - "shogun-api.ibbytech.com:192.168.71.220"
     ports:
       - "3010:3000"
     networks:
