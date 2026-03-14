@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  shogun-web-api:
+    build: .
+    container_name: shogun-web-api
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8090:8090"
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.shogun-web-api.rule=Host(`shogun-api.ibbytech.com`)"
+      - "traefik.http.routers.shogun-web-api.entrypoints=web"
+      - "traefik.http.services.shogun-web-api.loadbalancer.server.port=8090"
+
+networks:
+  traefik:
+    external: true

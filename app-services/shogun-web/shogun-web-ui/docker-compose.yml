@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  shogun-web-ui:
+    build: .
+    container_name: shogun-web-ui
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://shogun-api.ibbytech.com
+    ports:
+      - "3000:3000"
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.shogun-web-ui.rule=Host(`shogun.ibbytech.com`)"
+      - "traefik.http.routers.shogun-web-ui.entrypoints=web"
+      - "traefik.http.services.shogun-web-ui.loadbalancer.server.port=3000"
+
+networks:
+  traefik:
+    external: true
