@@ -58,12 +58,13 @@ def chat(body: ChatMessage, request: Request, user: User = Depends(get_current_u
     ]
 
     payload = {
-        "system": SYSTEM_PROMPT,
-        "messages": messages,
-        "max_tokens": 1024,
+        "provider": "google",
+        "model": "gemini-2.0-flash",
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+        "max_output_tokens": 1024,
     }
 
-    resp = httpx.post(f"{LLM_GATEWAY}/chat", json=payload, timeout=30.0)
+    resp = httpx.post(f"{LLM_GATEWAY}/v1/chat", json=payload, timeout=30.0)
     resp.raise_for_status()
     data = resp.json()
     response_text = data.get("output_text") or data.get("response", "")
