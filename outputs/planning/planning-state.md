@@ -1,5 +1,5 @@
 # Planning State — Shogun
-Last updated: 2026-03-13
+Last updated: 2026-03-14
 
 ## Project Summary
 
@@ -26,15 +26,15 @@ application logic.
 | shogun-core Phase 4 | Voice, photo, translation, location trigger, RAG pipeline | MVP 4 | Complete | 2026-03-13 |
 | Data ingest | Itinerary, POI by city, Madeline layer | MVP 5 | Complete | 2026-03-13 |
 | Printable itinerary | Standalone bilingual HTML — full trip details | MVP 6 | Not started | 2026-03-13 |
-| shogun-web Phase 1 | Foundation: Next.js + FastAPI on svcnode-01, auth bypass, internal deploy | Web | Not started | 2026-03-13 |
-| shogun-web Phase 2 | shogun-web-api: all DB + weather + blossom + reminders endpoints | Web | Not started | 2026-03-13 |
-| shogun-web Phase 3 | Per-city themed entry pages: tokyo, nara, osaka, kyoto (visual centerpiece) | Web | Not started | 2026-03-13 |
-| shogun-web Phase 4 | Calendar + Itinerary pages with edit mode | Web | Not started | 2026-03-13 |
-| shogun-web Phase 5 | Dashboard + weather widget + blossom tracker + AI chat | Web | Not started | 2026-03-13 |
-| shogun-web Phase 6 | POI knowledge base + YouTube search links + inline Shogun chat | Web | Not started | 2026-03-13 |
-| shogun-web Phase 7 | Day-specific trip reminders integrated throughout app | Web | Not started | 2026-03-13 |
-| shogun-web Phase 8 | Wishlist pipeline (Madeline submit, Todd/Brenda approve) | Web | Not started | 2026-03-13 |
-| shogun-web Phase 9 | Settings + Admin panel | Web | Not started | 2026-03-13 |
+| shogun-web Phase 1 | Foundation: Next.js + FastAPI on svcnode-01, auth bypass, internal deploy | Web | Complete | 2026-03-14 |
+| shogun-web Phase 2 | shogun-web-api: all DB + weather + blossom + reminders endpoints | Web | Complete | 2026-03-14 |
+| shogun-web Phase 3 | Per-city themed entry pages: tokyo, nara, osaka, kyoto (visual centerpiece) | Web | Complete | 2026-03-14 |
+| shogun-web Phase 4 | Calendar + Itinerary pages with edit mode | Web | Complete | 2026-03-14 |
+| shogun-web Phase 5 | Dashboard + weather widget + blossom tracker + AI chat | Web | Complete | 2026-03-14 |
+| shogun-web Phase 6 | POI knowledge base + YouTube search links + inline Shogun chat | Web | Complete | 2026-03-14 |
+| shogun-web Phase 7 | Day-specific trip reminders integrated throughout app | Web | Complete | 2026-03-14 |
+| shogun-web Phase 8 | Wishlist pipeline (Madeline submit, Todd/Brenda approve) | Web | Complete | 2026-03-14 |
+| shogun-web Phase 9 | Settings + Admin panel | Web | Complete | 2026-03-14 |
 | shogun-web CF cutover | Cloudflare Tunnel + Access + Google IdP — Todd's external items | Web | Blocked: Todd | 2026-03-13 |
 
 ## Open Decisions
