@@ -1,32 +1,42 @@
 import json
 from fastapi import APIRouter, Request, Depends, Query, HTTPException
-import httpx
 from auth import get_current_user, User
 from db import get_conn
 from models import Poi
 
 router = APIRouter(prefix="/pois", tags=["pois"])
 
+# Actual DB columns: id, city, name_en, name_ja, category, lat, lng,
+#   address_en, address_ja, tags, crowd_notes, best_time_notes, source, created_utc
+# No description column — use None. map_url constructed from lat/lng.
+
 
 def _row_to_poi(row) -> Poi:
-    tags = row[4]
+    # row: id, city, name_en, name_ja, category, lat, lng, tags, crowd_notes, best_time_notes, source
+    tags = row[7]
     if isinstance(tags, str):
         try:
             tags = json.loads(tags)
         except Exception:
             tags = [t.strip() for t in tags.split(",") if t.strip()]
+    elif tags is None:
+        tags = []
+
+    lat, lng = row[5], row[6]
+    map_url = f"https://maps.google.com/?q={lat},{lng}" if lat and lng else None
+
     return Poi(
         id=row[0],
         city=row[1],
         name_en=row[2],
         name_ja=row[3],
-        category=None,
+        category=row[4],
         tags=tags,
-        description=row[5],
-        crowd_notes=row[6],
-        best_time=row[7],
-        map_url=row[8],
-        source=row[9],
+        description=None,           # not in schema
+        crowd_notes=row[8],
+        best_time=row[9],           # best_time_notes
+        map_url=map_url,
+        source=row[10],
     )
 
 
@@ -42,8 +52,8 @@ def get_pois(
             if city:
                 cur.execute(
                     """
-                    SELECT id, city, name_en, name_ja, tags, description,
-                           crowd_notes, best_time, map_url, source
+                    SELECT id, city, name_en, name_ja, category, lat, lng,
+                           tags, crowd_notes, best_time_notes, source
                     FROM trip_pois WHERE city=%s ORDER BY name_en
                     """,
                     (city,),
@@ -51,8 +61,8 @@ def get_pois(
             else:
                 cur.execute(
                     """
-                    SELECT id, city, name_en, name_ja, tags, description,
-                           crowd_notes, best_time, map_url, source
+                    SELECT id, city, name_en, name_ja, category, lat, lng,
+                           tags, crowd_notes, best_time_notes, source
                     FROM trip_pois ORDER BY city, name_en
                     """
                 )
@@ -76,8 +86,8 @@ def get_poi_knowledge(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, city, name_en, name_ja, tags, description,
-                       crowd_notes, best_time, map_url, source
+                SELECT id, city, name_en, name_ja, category, lat, lng,
+                       tags, crowd_notes, best_time_notes, source
                 FROM trip_pois WHERE id=%s
                 """,
                 (poi_id,),
@@ -96,7 +106,7 @@ def get_poi_knowledge(
 
     return {
         "poi": poi,
-        "summary": poi.description,
+        "summary": poi.crowd_notes,
         "youtube_query": youtube_query,
         "suggested_searches": suggested_searches,
         "booking_url": poi.map_url,

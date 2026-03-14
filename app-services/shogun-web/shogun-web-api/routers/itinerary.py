@@ -11,15 +11,15 @@ def _row_to_leg(row) -> ItineraryLeg:
         id=row[0],
         leg_type=row[1],
         city=row[2],
-        date_start=row[3],
-        date_end=row[4],
-        title=row[5],
-        description=row[6],
-        address_en=row[7],
-        address_ja=row[8],
-        confirmation_number=row[9],
-        notes=row[10],
-        status=row[11],
+        date_start=row[3],      # date_local
+        date_end=None,
+        title=row[4],
+        description=row[5],     # notes_en
+        address_en=row[6],
+        address_ja=row[7],
+        confirmation_number=row[8],
+        notes=row[9],           # notes_ja
+        status=None,
     )
 
 
@@ -29,11 +29,10 @@ def get_itinerary(request: Request, user: User = Depends(get_current_user)):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, leg_type, city, date_start, date_end, title,
-                       description, address_en, address_ja, confirmation_number,
-                       notes, status
+                SELECT id, leg_type, city, date_local, title,
+                       notes_en, address_en, address_ja, confirmation_number, notes_ja
                 FROM trip_itinerary
-                ORDER BY date_start, id
+                ORDER BY date_local, leg_sequence
                 """
             )
             return [_row_to_leg(r) for r in cur.fetchall()]
@@ -47,17 +46,16 @@ def add_leg(body: ItineraryLegCreate, request: Request, user: User = Depends(get
             cur.execute(
                 """
                 INSERT INTO trip_itinerary
-                  (leg_type, city, date_start, date_end, title, description,
-                   address_en, address_ja, confirmation_number, notes, status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                RETURNING id, leg_type, city, date_start, date_end, title,
-                          description, address_en, address_ja, confirmation_number,
-                          notes, status
+                  (leg_type, city, date_local, title, notes_en,
+                   address_en, address_ja, confirmation_number, notes_ja)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id, leg_type, city, date_local, title,
+                          notes_en, address_en, address_ja, confirmation_number, notes_ja
                 """,
                 (
-                    body.leg_type, body.city, body.date_start, body.date_end,
+                    body.leg_type, body.city, body.date_start,
                     body.title, body.description, body.address_en, body.address_ja,
-                    body.confirmation_number, body.notes, body.status,
+                    body.confirmation_number, body.notes,
                 ),
             )
             return _row_to_leg(cur.fetchone())
@@ -71,18 +69,16 @@ def update_leg(leg_id: int, body: ItineraryLegCreate, request: Request, user: Us
             cur.execute(
                 """
                 UPDATE trip_itinerary
-                SET leg_type=%s, city=%s, date_start=%s, date_end=%s, title=%s,
-                    description=%s, address_en=%s, address_ja=%s,
-                    confirmation_number=%s, notes=%s, status=%s
+                SET leg_type=%s, city=%s, date_local=%s, title=%s, notes_en=%s,
+                    address_en=%s, address_ja=%s, confirmation_number=%s, notes_ja=%s
                 WHERE id=%s
-                RETURNING id, leg_type, city, date_start, date_end, title,
-                          description, address_en, address_ja, confirmation_number,
-                          notes, status
+                RETURNING id, leg_type, city, date_local, title,
+                          notes_en, address_en, address_ja, confirmation_number, notes_ja
                 """,
                 (
-                    body.leg_type, body.city, body.date_start, body.date_end,
+                    body.leg_type, body.city, body.date_start,
                     body.title, body.description, body.address_en, body.address_ja,
-                    body.confirmation_number, body.notes, body.status, leg_id,
+                    body.confirmation_number, body.notes, leg_id,
                 ),
             )
             row = cur.fetchone()

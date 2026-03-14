@@ -24,10 +24,10 @@ def _current_city_from_db() -> tuple[str | None, int | None]:
             cur.execute(
                 """
                 SELECT city FROM trip_itinerary
-                WHERE date_start <= %s AND date_end >= %s AND city IS NOT NULL
-                ORDER BY date_start LIMIT 1
+                WHERE date_local <= %s AND city IS NOT NULL
+                ORDER BY date_local DESC, leg_sequence DESC LIMIT 1
                 """,
-                (today, today),
+                (today,),
             )
             row = cur.fetchone()
             city = row[0] if row else None
