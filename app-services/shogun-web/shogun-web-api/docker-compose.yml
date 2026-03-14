@@ -9,7 +9,7 @@ services:
     ports:
       - "8090:8090"
     networks:
-      - traefik
+      - platform_net
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.shogun-web-api.rule=Host(`shogun-api.ibbytech.com`)"
@@ -17,5 +17,5 @@ services:
       - "traefik.http.services.shogun-web-api.loadbalancer.server.port=8090"
 
 networks:
-  traefik:
+  platform_net:
     external: true
