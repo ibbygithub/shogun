@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  shogun-web-ui:
+    build:
+      context: .
+      args:
+        # Laptop recovery: browser calls the API directly on localhost.
+        # NEXT_PUBLIC_ vars are inlined at build time — must be a browser-reachable URL.
+        - NEXT_PUBLIC_API_URL=http://shogun-web-api:8090
+    container_name: shogun-web-ui
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3010:3000"
+    networks:
+      - platform_net
+
+networks:
+  platform_net:
+    external: true

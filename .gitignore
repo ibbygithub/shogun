@@ -5,6 +5,14 @@
 **/*.secret
 **/secrets/**
 !**/.env.example
+
 # Traefik TLS certs (local-only)
 infra/platform/compose/certs/*
 !infra/platform/compose/certs/.keep
+
+# Agent / Claude tooling (local only)
+.agent/
+# Ignore .claude internals but track CLAUDE.md and settings.json
+.claude/worktrees/
+.claude/settings.local.json
+.claude/__pycache__/

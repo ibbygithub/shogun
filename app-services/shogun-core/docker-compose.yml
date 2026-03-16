@@ -1,0 +1,18 @@
+networks:
+  platform_net:
+    external: true
+    name: platform_net
+
+services:
+  shogun-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: shogun-core
+    container_name: shogun-core
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8082:8082"    # Localhost only — health checks and debugging
+    networks:
+      - platform_net

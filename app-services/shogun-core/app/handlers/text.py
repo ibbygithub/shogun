@@ -1,0 +1,55 @@
+"""
+Text message handler — the primary interaction path.
+Checks for system commands first, then routes to LLM (with RAG for food/place queries).
+Translate mode: when active, appends translation instruction to the system prompt.
+"""
+import logging
+from app.models import TelegramEnvelope
+from app.commands.system import handle_command
+from app.services.llm import chat, build_system_prompt
+from app.services.rag import respond as rag_respond
+from app.valkey_client import get_context, save_context, get_translate_mode
+
+logger = logging.getLogger(__name__)
+
+
+async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict]) -> str:
+    """Process a text message. Returns reply_text."""
+    text = envelope.payload.get("text", "").strip()
+    telegram_user_id = envelope.from_.user_id
+
+    # System commands bypass LLM
+    if text.startswith("/"):
+        reply = handle_command(text, user)
+        if reply:
+            return reply
+
+    # Unknown users get a polite rejection
+    if not user:
+        logger.warning("Unregistered user %s sent: %s", telegram_user_id, text[:50])
+        return "Hi! I'm Shogun, the Ibbotson family Japan concierge. You're not registered in my system. Ask Todd to add you."
+
+    # Build conversation context
+    history = get_context(telegram_user_id)
+    system_prompt = build_system_prompt(user, prefs)
+
+    # Translate mode: append translation instruction to system prompt
+    if get_translate_mode(telegram_user_id):
+        system_prompt += (
+            "\n\nThe user has translate mode active. "
+            "For any Japanese text they send: translate to English. "
+            "For any English text they send: translate to Japanese and show both. "
+            "Keep translations natural and note any cultural context where useful."
+        )
+
+    # Route through RAG for food/place queries, plain LLM otherwise
+    reply = await rag_respond(text, history, system_prompt)
+
+    # Persist updated context (user + assistant turn)
+    history.append({"role": "user", "content": text})
+    history.append({"role": "assistant", "content": reply})
+    if len(history) > 20:
+        history = history[-20:]
+    save_context(telegram_user_id, history)
+
+    return reply
