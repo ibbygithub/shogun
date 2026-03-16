@@ -18,7 +18,7 @@ const nextConfig = {
         headers: [
           {
             key: "Content-Security-Policy",
-            value: "frame-src 'self' https://embed.windy.com;",
+            value: "frame-src 'self' https://embed.windy.com https://www.youtube.com https://youtube.com https://maps.google.com https://www.google.com *;",
           },
         ],
       },

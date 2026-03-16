@@ -70,6 +70,16 @@ export const api = {
       apiFetch("/chat", { method: "POST", body: JSON.stringify({ message }) }),
     history: () => apiFetch("/chat/history"),
   },
+  ambient: {
+    summary: () => apiFetch("/api/ambient/summary"),
+    weather: (city: string) => apiFetch(`/api/ambient/weather/${city}`),
+    sakura: (city: string) => apiFetch(`/api/ambient/sakura/${city}`),
+    transit: (city: string) => apiFetch(`/api/ambient/transit/${city}`),
+    events: (city: string) => apiFetch(`/api/ambient/events/${city}`),
+    aqi: (city: string) => apiFetch(`/api/ambient/aqi/${city}`),
+    exchangeRate: () => apiFetch("/api/ambient/exchange-rate"),
+    calendar: () => apiFetch("/api/ambient/calendar"),
+  },
   admin: {
     health: () => apiFetch("/admin/health"),
   },

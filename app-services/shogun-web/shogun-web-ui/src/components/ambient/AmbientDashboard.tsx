@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { api } from "@/lib/api";
 import WeatherCard from "./WeatherCard";
 import SakuraStatus from "./SakuraStatus";
 import TransitAlert from "./TransitAlert";
@@ -60,12 +61,6 @@ interface SummaryData {
   generated_at: string;
 }
 
-// API_BASE mirrors lib/api.ts: browser uses relative /api, SSR uses env var.
-const API_BASE =
-  typeof window !== "undefined"
-    ? "/api"
-    : process.env.NEXT_PUBLIC_API_URL || "http://shogun-api.ibbytech.com";
-
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
 export default function AmbientDashboard() {
@@ -75,12 +70,8 @@ export default function AmbientDashboard() {
 
   const fetchSummary = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/ambient/summary`, {
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setData(json as SummaryData);
+      const json = await api.ambient.summary() as SummaryData;
+      setData(json);
       setFetchError(false);
     } catch (e) {
       console.error("AmbientDashboard: failed to fetch summary", e);
