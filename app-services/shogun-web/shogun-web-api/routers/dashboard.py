@@ -46,10 +46,13 @@ def _shogun_core_health() -> str:
 
 
 def _pending_wishlist_count() -> int:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM wishlist_items WHERE status = 'pending'")
-            return cur.fetchone()[0]
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM wishlist_items WHERE status = 'pending'")
+                return cur.fetchone()[0]
+    except Exception:
+        return 0
 
 
 @router.get("/status", response_model=DashboardStatus)

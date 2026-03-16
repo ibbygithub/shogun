@@ -53,7 +53,7 @@ def admin_health(request: Request, user: User = Depends(get_current_user)):
     require_admin(user)
     llm_url = os.getenv("LLM_GATEWAY_URL", "http://llm.platform.ibbytech.com")
     services = [
-        _check_http("shogun-core",       "http://brainnode-01.ibbytech.com:8082/health"),
+        _check_http("shogun-core",       "http://shogun-core:8082/health"),
         _check_http("llm-gateway",       f"{llm_url}/health"),
         _check_http("telegram-gateway",  "http://telegram.platform.ibbytech.com/health"),
         _check_valkey(),
