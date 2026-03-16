@@ -103,3 +103,22 @@ export interface ChatMessage {
   content: string;
   timestamp: number | null;
 }
+
+export interface UpcomingLeg {
+  leg: number;
+  title: string;
+  city: string | null;
+  date: string;
+  notes: string | null;
+}
+
+export interface CalendarData {
+  date: string;
+  event: string | null;
+  note: string | null;
+  is_holiday: boolean;
+  error?: string;
+  // Pre-trip fields returned when no active itinerary leg today
+  days_until_trip?: number;
+  upcoming_legs?: UpcomingLeg[];
+}

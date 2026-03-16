@@ -72,21 +72,21 @@ export default function KnowledgeDeepDive({ data }: Props) {
       {/* Learn more */}
       <div style={{ background: "white", borderRadius: "10px", padding: "1rem", marginBottom: "1rem", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
         <h3 style={{ fontWeight: 700, marginBottom: "0.75rem" }}>Learn More</h3>
-        <button
-          onClick={() => setMediaViewer({
-            url: `https://www.youtube.com/results?search_query=${encodeURIComponent(data.youtube_query)}`,
-            title: `YouTube — ${poi.name_en}`,
-          })}
+        {/* YouTube opens directly in a new tab — YouTube blocks embedding via X-Frame-Options */}
+        <a
+          href={`https://www.youtube.com/results?search_query=${encodeURIComponent(data.youtube_query)}`}
+          target="_blank"
+          rel="noopener noreferrer"
           style={{
             display: "inline-flex", alignItems: "center", gap: "0.5rem",
             background: "#ff0000", color: "white", padding: "0.5rem 1rem",
             borderRadius: "8px", fontWeight: 600, fontSize: "0.85rem",
-            border: "none", cursor: "pointer",
+            textDecoration: "none",
             marginBottom: "0.75rem",
           }}
         >
-          ▶ Watch on YouTube
-        </button>
+          ▶ Watch on YouTube ↗
+        </a>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
           {data.suggested_searches.map((q, i) => (
             <button

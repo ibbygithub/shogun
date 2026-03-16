@@ -1,5 +1,9 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import type { Poi } from "@/lib/types";
+import { api } from "@/lib/api";
 
 interface Props {
   poi: Poi;
@@ -45,9 +49,44 @@ function getCategoryBadge(category: string | null): { bg: string; text: string; 
   return { bg: "#F3F4F6", text: "#4B5563", label: category };
 }
 
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 export default function PoiCard({ poi }: Props) {
   const cityBg = (poi.city && CITY_BG[poi.city]) ? CITY_BG[poi.city] : "#F5F5F5";
   const badge = getCategoryBadge(poi.category);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  async function handleSave(e: React.MouseEvent) {
+    // Don't trigger the card's Link navigation
+    e.preventDefault();
+    e.stopPropagation();
+    if (saveState !== "idle") return;
+    setSaveState("saving");
+    try {
+      await api.wishlist.create({ city: poi.city || undefined, description: poi.name_en });
+      setSaveState("saved");
+      setTimeout(() => setSaveState("idle"), 2000);
+    } catch {
+      setSaveState("error");
+      setTimeout(() => setSaveState("idle"), 3000);
+    }
+  }
+
+  const saveLabel =
+    saveState === "saving" ? "…" :
+    saveState === "saved"  ? "✓ Saved" :
+    saveState === "error"  ? "⚠ Failed" :
+    "⭐ Save";
+
+  const saveBg =
+    saveState === "saved"  ? "#d1fae5" :
+    saveState === "error"  ? "#fee2e2" :
+    "rgba(255,255,255,0.75)";
+
+  const saveColor =
+    saveState === "saved"  ? "#065f46" :
+    saveState === "error"  ? "#991b1b" :
+    "#374151";
 
   return (
     <Link href={`/pois/${poi.id}`} style={{ textDecoration: "none" }}>
@@ -58,6 +97,7 @@ export default function PoiCard({ poi }: Props) {
         boxShadow: "0 1px 3px rgba(0,0,0,0.07)",
         cursor: "pointer",
         transition: "transform 0.15s, box-shadow 0.15s",
+        position: "relative",
       }}>
         {/* Category badge */}
         {badge && (
@@ -128,6 +168,27 @@ export default function PoiCard({ poi }: Props) {
             ⏰ {poi.best_time}
           </div>
         )}
+
+        {/* Save to collection button */}
+        <div style={{ marginTop: "0.625rem", display: "flex", justifyContent: "flex-end" }}>
+          <button
+            onClick={handleSave}
+            disabled={saveState === "saving"}
+            style={{
+              fontSize: "0.72rem",
+              fontWeight: 600,
+              background: saveBg,
+              color: saveColor,
+              border: "1px solid rgba(0,0,0,0.1)",
+              borderRadius: "6px",
+              padding: "3px 10px",
+              cursor: saveState === "saving" ? "default" : "pointer",
+              transition: "background 0.2s, color 0.2s",
+            }}
+          >
+            {saveLabel}
+          </button>
+        </div>
       </div>
     </Link>
   );

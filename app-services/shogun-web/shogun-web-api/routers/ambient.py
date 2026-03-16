@@ -281,9 +281,41 @@ def _fetch_today_itinerary_for_calendar() -> Optional[dict]:
         return None
 
 
+def _fetch_upcoming_legs(limit: int = 3) -> list[dict]:
+    """Returns the next N itinerary legs starting from today or later."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT leg_sequence, title, city, date_local, notes_en
+                    FROM trip_itinerary
+                    WHERE date_local >= %s
+                    ORDER BY date_local, leg_sequence
+                    LIMIT %s
+                    """,
+                    (date.today().isoformat(), limit),
+                )
+                rows = cur.fetchall()
+                return [
+                    {
+                        "leg": r[0],
+                        "title": r[1],
+                        "city": r[2],
+                        "date": str(r[3]),
+                        "notes": r[4],
+                    }
+                    for r in rows
+                ]
+    except Exception as e:
+        logger.warning("_fetch_upcoming_legs query failed: %s", e)
+        return []
+
+
 def _fetch_calendar() -> dict:
     """Return today's Japan holiday / spring event and trip itinerary entry."""
-    today_str = date.today().isoformat()
+    today = date.today()
+    today_str = today.isoformat()
 
     event = JAPAN_HOLIDAYS_2026.get(today_str)
     is_holiday = event is not None
@@ -293,13 +325,19 @@ def _fetch_calendar() -> dict:
         event = note  # use spring event as primary if no formal holiday
 
     itinerary = _fetch_today_itinerary_for_calendar()
+    upcoming = _fetch_upcoming_legs(limit=3)
+
+    trip_start = date(2026, 3, 23)
+    days_until_trip = (trip_start - today).days if today < trip_start else 0
 
     return {
         "date": today_str,
         "event": event,
         "note": note if is_holiday else None,  # extra note only alongside a holiday
         "is_holiday": is_holiday,
-        "itinerary": itinerary,
+        "itinerary": itinerary,           # today's leg (during trip)
+        "upcoming_legs": upcoming,         # next 3 legs from today
+        "days_until_trip": days_until_trip,  # 0 if trip already started
     }
 
 

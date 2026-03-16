@@ -27,6 +27,9 @@ interface ExchangeData {
 interface CalendarData {
   date: string; event: string | null; note: string | null;
   is_holiday: boolean; error?: string;
+  // Pre-trip fields — present when no active itinerary leg today
+  days_until_trip?: number;
+  upcoming_legs?: { leg: number; title: string; city: string | null; date: string; notes: string | null }[];
 }
 interface AqiData {
   city: string; aqi: number | null; category: string;
@@ -106,7 +109,11 @@ export default function AmbientDashboard() {
   const city = data?.city ?? "osaka";
   const lat = data?.lat ?? 34.6937;
   const lon = data?.lon ?? 135.5023;
-  const hasCalendarEvent = !!(data?.calendar?.event);
+  // Show CalendarEvent tile for: active event today, OR pre-trip countdown (days_until_trip > 0)
+  const showCalendar = !!(
+    data?.calendar?.event ||
+    (data?.calendar?.days_until_trip && data.calendar.days_until_trip > 0)
+  );
 
   return (
     <section style={{ marginBottom: "1.5rem" }}>
@@ -126,7 +133,7 @@ export default function AmbientDashboard() {
         )}
       </div>
 
-      {(loading || hasCalendarEvent) && (
+      {(loading || showCalendar) && (
         <div style={{ marginBottom: "0.75rem" }}>
           <CalendarEvent data={data?.calendar ?? null} />
         </div>
