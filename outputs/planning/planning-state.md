@@ -1,20 +1,40 @@
 # Planning State — Shogun
-Last updated: 2026-03-14
+Last updated: 2026-03-15
 
 ## Project Summary
 
 Shogun is an AI travel concierge for the Ibbotson Japan trip (Mar 23–Apr 9).
-Delivered via Telegram (shogun-core on brainnode-01) and a web frontend
-(shogun-web on svcnode-01). The Telegram bot handles live location-aware
-recommendations; the web app gives Brenda an itinerary editing surface and
-all three travelers a unified trip view. Shogun is the reference consumer of
-IbbyTech platform services — platform owns infrastructure, Shogun owns
-application logic.
+Delivered via Telegram (shogun-core) and a web frontend (shogun-web).
+The Telegram bot handles live location-aware recommendations; the web app gives
+Brenda an itinerary editing surface and all three travelers a unified trip view.
+
+**Current infrastructure: all 10 services running on Docker Desktop (Windows laptop).**
+3-node Proxmox lab was lost 2026-03-14. Fully recovered from GitHub on 2026-03-15.
+Migration guide: `outputs/planning/migration-guide.md`
+Startup/shutdown: `scripts/start-shogun.ps1` / `scripts/stop-shogun.ps1`
+
+## Infrastructure — Current State (2026-03-15)
+All services running on Docker Desktop. Telegram in polling mode (no public URL needed).
+PostgreSQL runs as a container (was bare metal on dbnode-01).
+shogun-core runs as a container (was systemd on brainnode-01).
+Traefik is disabled — direct port mapping used instead.
+Web UI: http://localhost:3010
+
+## RECOVERY COMPLETE — 2026-03-15
+✅ All 10 containers running and validated
+✅ Telegram bot live (polling mode)
+✅ LLM pipeline working (Gemini 2.0 Flash via llm-gateway)
+✅ Location trigger logic validated
+✅ Web UI loading at localhost:3010
+✅ Web AI chat working
+✅ Database schema applied, Todd seeded (11 itinerary legs, 30 POIs, 8 preferences)
+✅ Start/stop scripts with directory preservation
 
 ## Active Work
 
 | Item | Description | Phase | Status | Last Updated |
 |------|-------------|-------|--------|--------------|
+| Disaster recovery — Docker Desktop | Rebuild all platform + shogun services on laptop Docker Desktop | Emergency | In Progress | 2026-03-14 |
 | Claude Code foundation setup | .claude/CLAUDE.md, settings.json, foundation link established | Bootstrap | Complete | 2026-03-12 |
 | Deploy branch resolution | feature/gateway-pure-search-endpoints merged to develop. develop branch established. | Bootstrap | Complete | 2026-03-12 |
 | DNS Infrastructure | All 3 nodes confirmed pointing at Pi-hole. valkey.platform.ibbytech.com resolves on all nodes. | Pre-MVP 3 | Complete | 2026-03-12 |

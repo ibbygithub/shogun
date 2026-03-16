@@ -28,6 +28,7 @@ app.add_middleware(
     allow_origins=[
         "http://shogun.ibbytech.com",
         "http://localhost:3000",
+        "http://localhost:3010",
         "http://192.168.71.220:3000",
     ],
     allow_credentials=True,
