@@ -18,6 +18,7 @@ Set-Location "$SHOGUN\app-services\shogun-web\shogun-web-api"; docker compose do
 Set-Location "$SHOGUN\app-services\shogun-core";               docker compose down
 
 Step "Stopping Platform services"
+Set-Location "$PLATFORM\services\reddit-gateway";  docker compose down
 Set-Location "$PLATFORM\services\scraper";         docker compose down
 Set-Location "$PLATFORM\services\tavily";          docker compose down
 Set-Location "$PLATFORM\services\places-google";   docker compose down

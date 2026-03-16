@@ -6,6 +6,9 @@
 **/secrets/**
 !**/.env.example
 
+# credential notes (local only)
+**/google oauth for cloudflare.txt
+
 # Traefik TLS certs (local-only)
 infra/platform/compose/certs/*
 !infra/platform/compose/certs/.keep
