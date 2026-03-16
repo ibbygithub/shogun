@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from auth import User, get_current_user
 from cache import get_cache
+from db import get_conn
 from services.tavily import tavily_search
 
 logger = logging.getLogger(__name__)
@@ -246,8 +247,42 @@ async def _fetch_exchange_rate() -> dict:
     return result
 
 
+def _fetch_today_itinerary_for_calendar() -> Optional[dict]:
+    """
+    Query trip_itinerary for today's date_local.
+    Returns a dict with leg, title, city, notes, or None if no row exists.
+    Failures are logged and silently swallowed — calendar must not crash.
+    """
+    today_str = date.today().isoformat()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT leg_sequence, title, city, date_local, notes_en
+                    FROM trip_itinerary
+                    WHERE date_local = %s
+                    ORDER BY leg_sequence
+                    LIMIT 1
+                    """,
+                    (today_str,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "leg": row[0],
+            "title": row[1],
+            "city": row[2],
+            "notes": row[4],  # notes_en
+        }
+    except Exception as e:
+        logger.warning("trip_itinerary query failed in calendar: %s", e)
+        return None
+
+
 def _fetch_calendar() -> dict:
-    """Return today's Japan holiday or spring event — purely static, no API."""
+    """Return today's Japan holiday / spring event and trip itinerary entry."""
     today_str = date.today().isoformat()
 
     event = JAPAN_HOLIDAYS_2026.get(today_str)
@@ -257,11 +292,14 @@ def _fetch_calendar() -> dict:
     if not event:
         event = note  # use spring event as primary if no formal holiday
 
+    itinerary = _fetch_today_itinerary_for_calendar()
+
     return {
         "date": today_str,
         "event": event,
         "note": note if is_holiday else None,  # extra note only alongside a holiday
         "is_holiday": is_holiday,
+        "itinerary": itinerary,
     }
 
 

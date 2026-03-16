@@ -2,10 +2,11 @@ import json
 import os
 import time
 import httpx
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from fastapi import APIRouter, Request, Depends
 from auth import get_current_user, User
 from cache import get_cache
+from db import get_conn
 from models import ChatMessage
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -125,10 +126,79 @@ def _get_weather_for_city(city: str) -> str | None:
         return None
 
 
+def _fetch_city_pois(city: str) -> list[dict]:
+    """
+    Query trip_pois for the given city.
+    Returns a list of dicts with name_en, name_ja, category, crowd_notes, best_time_notes.
+    Returns [] on any DB failure — callers degrade gracefully.
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT name_en, name_ja, category, crowd_notes, best_time_notes
+                    FROM trip_pois
+                    WHERE city = %s
+                    ORDER BY name_en
+                    """,
+                    (city,),
+                )
+                rows = cur.fetchall()
+        return [
+            {
+                "name_en": r[0],
+                "name_ja": r[1],
+                "category": r[2],
+                "crowd_notes": r[3],
+                "best_time_notes": r[4],
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
+
+
+def _fetch_today_itinerary() -> dict | None:
+    """
+    Query trip_itinerary for today's date (date_local).
+    Returns the first matching row as a dict, or None.
+    """
+    today = date.today().isoformat()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT leg_sequence, title, city, date_local, notes_en
+                    FROM trip_itinerary
+                    WHERE date_local = %s
+                    ORDER BY leg_sequence
+                    LIMIT 1
+                    """,
+                    (today,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "leg_sequence": row[0],
+            "title": row[1],
+            "city": row[2],
+            "date_local": str(row[3]),
+            "notes_en": row[4],
+        }
+    except Exception:
+        return None
+
+
 def build_system_prompt(city: str = "osaka") -> str:
     """
     Build the chat system prompt dynamically at request time.
-    Injects current JST date/time and live weather data.
+    Injects current JST date/time, live weather, today's itinerary, and
+    the actual POIs for the current city from the database.
+    The POI section is formatted to be unmissable by the LLM so it uses
+    dashboard data rather than generic knowledge.
     """
     now_jst   = datetime.now(_JST)
     today_str = now_jst.strftime("%Y-%m-%d")
@@ -139,6 +209,40 @@ def build_system_prompt(city: str = "osaka") -> str:
     if weather_str:
         weather_line = f"\nToday's weather: {weather_str}"
 
+    # Fetch today's itinerary and city POIs from the database
+    itinerary = _fetch_today_itinerary()
+    pois = _fetch_city_pois(city)
+
+    # Build the dashboard data block — formatted to be hard to ignore
+    dashboard_lines = ["", "=== YOUR DASHBOARD DATA — USE THIS, DO NOT SUBSTITUTE ==="]
+
+    if itinerary:
+        itin_notes = itinerary.get("notes_en") or ""
+        itin_title = itinerary.get("title") or ""
+        notes_suffix = f" — {itin_notes}" if itin_notes else ""
+        dashboard_lines.append(f"Today's itinerary: {itin_title}{notes_suffix}")
+    else:
+        dashboard_lines.append("Today's itinerary: No itinerary entry for today (pre-trip or rest day)")
+
+    if pois:
+        dashboard_lines.append(f"Top places shown on the {city.title()} dashboard:")
+        for i, p in enumerate(pois, start=1):
+            name = p["name_en"]
+            category = p["category"] or "Place"
+            crowd = p["crowd_notes"] or ""
+            line = f"{i}. {name} ({category})"
+            if crowd:
+                line += f" — {crowd}"
+            dashboard_lines.append(line)
+    else:
+        dashboard_lines.append(
+            f"No POI data found for {city.title()} in the database. "
+            f"Use your general knowledge about this city."
+        )
+
+    dashboard_lines.append("=======================================================")
+    dashboard_block = "\n".join(dashboard_lines)
+
     return (
         f"You are Shogun, an AI travel concierge for the Ibbotson family's Japan trip "
         f"(March 23 – April 9, 2026). You have deep knowledge of every city, restaurant, "
@@ -148,6 +252,7 @@ def build_system_prompt(city: str = "osaka") -> str:
         f"and an educational guide — if someone asks about Todaiji Temple, give them "
         f"a real educational answer, not just basic tourist tips.\n"
         f"Current date and time: {today_str} {time_str} JST{weather_line}"
+        f"{dashboard_block}"
     )
 
 
