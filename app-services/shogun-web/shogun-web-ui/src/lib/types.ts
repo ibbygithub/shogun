@@ -122,3 +122,12 @@ export interface CalendarData {
   days_until_trip?: number;
   upcoming_legs?: UpcomingLeg[];
 }
+
+export interface BudgetItem {
+  id: number;
+  trip_date: string | null;
+  category: string;
+  description: string;
+  amount_jpy: number;
+  created_utc: string;
+}

@@ -85,6 +85,12 @@ export const api = {
     schedule: (body: { date: string; poi_name: string; city: string; notes: string }) =>
       apiFetch("/planning/schedule", { method: "POST", body: JSON.stringify(body) }),
   },
+  budget: {
+    list: () => apiFetch<{ items: import("./types").BudgetItem[]; total_jpy: number; by_category: Record<string, number> }>("/api/budget"),
+    add: (body: { trip_date?: string; category: string; description: string; amount_jpy: number }) =>
+      apiFetch<import("./types").BudgetItem>("/api/budget", { method: "POST", body: JSON.stringify(body) }),
+    remove: (id: number) => apiFetch<{ ok: boolean }>(`/api/budget/${id}`, { method: "DELETE" }),
+  },
   admin: {
     health: () => apiFetch("/admin/health"),
   },

@@ -5,6 +5,8 @@ import type { ItineraryLeg } from "@/lib/types";
 import CityTheme from "@/components/city/CityTheme";
 import CityHero from "@/components/city/CityHero";
 import WeatherWidget from "@/components/widgets/WeatherWidget";
+import WeatherPlanner from "@/components/widgets/WeatherPlanner";
+import GhibliCountdown from "@/components/widgets/GhibliCountdown";
 import CityBlossomSection from "@/components/city/CityBlossomSection";
 import RemindersPanel from "@/components/reminders/RemindersPanel";
 import PoiCard from "@/components/pois/PoiCard";
@@ -56,6 +58,9 @@ export default async function CityPage({ params }: { params: { slug: string } })
 
       <div style={{ padding: "1.5rem", maxWidth: "1100px" }}>
 
+        {/* Ghibli countdown — Tokyo only */}
+        {slug === "tokyo" && <GhibliCountdown />}
+
         {/* Map + POI split — highest priority section */}
         {(showMap || pois.length > 0) && (
           <div style={{ marginBottom: "1.5rem" }}>
@@ -90,9 +95,14 @@ export default async function CityPage({ params }: { params: { slug: string } })
         )}
 
         {/* Context strip */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
           <WeatherWidget city={slug} />
           <CityBlossomSection slug={slug} />
+        </div>
+
+        {/* 5-day outdoor planner */}
+        <div style={{ marginBottom: "1.5rem" }}>
+          <WeatherPlanner city={slug} />
         </div>
 
         {/* Today's schedule (if in city today) */}

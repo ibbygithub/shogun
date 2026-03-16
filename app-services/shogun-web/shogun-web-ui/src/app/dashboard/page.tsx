@@ -1,5 +1,6 @@
 import TripStatusCard from "@/components/widgets/TripStatusCard";
 import WeatherWidget from "@/components/widgets/WeatherWidget";
+import WeatherPlanner from "@/components/widgets/WeatherPlanner";
 import BlossomWidget from "@/components/widgets/BlossomWidget";
 import ShogunHealthCard from "@/components/widgets/ShogunHealthCard";
 import RemindersPanel from "@/components/reminders/RemindersPanel";
@@ -37,6 +38,10 @@ export default function DashboardPage() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
         <WeatherWidget city={todayCity()} />
         <BlossomWidget />
+      </div>
+
+      <div style={{ marginBottom: "1rem" }}>
+        <WeatherPlanner city={todayCity()} />
       </div>
 
       <div style={{ background: "white", borderRadius: "12px", padding: "1rem", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
