@@ -7,6 +7,7 @@ import { CITIES } from "@/lib/cities";
 const NAV = [
   { href: "/dashboard",  label: "Dashboard",  icon: "🏠" },
   { href: "/calendar",   label: "Calendar",   icon: "📅" },
+  { href: "/planning",   label: "Planning",   icon: "📋" },
   { href: "/itinerary",  label: "Itinerary",  icon: "🗺️" },
   { href: "/pois",       label: "Places",     icon: "📍" },
   { href: "/chat",       label: "Chat Shogun", icon: "💬" },

@@ -1,21 +1,20 @@
 import { notFound } from "next/navigation";
 import { CITIES, type CitySlug } from "@/lib/cities";
 import { api } from "@/lib/api";
-import type { ItineraryLeg, BlossomEntry } from "@/lib/types";
+import type { ItineraryLeg } from "@/lib/types";
 import CityTheme from "@/components/city/CityTheme";
 import CityHero from "@/components/city/CityHero";
 import WeatherWidget from "@/components/widgets/WeatherWidget";
-import BlossomWidget from "@/components/widgets/BlossomWidget";
+import CityBlossomSection from "@/components/city/CityBlossomSection";
 import RemindersPanel from "@/components/reminders/RemindersPanel";
 import PoiCard from "@/components/pois/PoiCard";
 import PoisMap from "@/components/pois/PoisMap";
 import { Poi } from "@/lib/types";
 
 async function getCityData(slug: string) {
-  const [legs, pois, blossom] = await Promise.allSettled([
+  const [legs, pois] = await Promise.allSettled([
     api.itinerary.list() as Promise<ItineraryLeg[]>,
     api.pois.list(slug) as Promise<Poi[]>,
-    api.blossom.list() as Promise<BlossomEntry[]>,
   ]);
 
   const allPois = pois.status === "fulfilled" ? pois.value : [];
@@ -24,7 +23,6 @@ async function getCityData(slug: string) {
     legs: legs.status === "fulfilled" ? legs.value : [],
     // all POIs passed through — city page shows first 6 in cards, all on the map
     pois: allPois,
-    blossom: blossom.status === "fulfilled" ? blossom.value.find((b) => b.city === slug) : null,
   };
 }
 
@@ -34,7 +32,7 @@ export default async function CityPage({ params }: { params: { slug: string } })
 
   const city = CITIES[slug];
   const today = new Date().toISOString().split("T")[0];
-  const { legs, pois, blossom } = await getCityData(slug);
+  const { legs, pois } = await getCityData(slug);
 
   // Today's legs for this city
   const todayLegs = (legs as ItineraryLeg[]).filter(
@@ -94,23 +92,7 @@ export default async function CityPage({ params }: { params: { slug: string } })
         {/* Context strip */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
           <WeatherWidget city={slug} />
-          <div style={{ background: "white", borderRadius: "12px", padding: "1rem", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-            <div style={{ fontWeight: 700, marginBottom: "0.5rem" }}>🌸 Blossom</div>
-            {blossom ? (
-              <>
-                <div style={{ fontSize: "0.875rem" }}>{blossom.spot}</div>
-                <span className={`blossom-${blossom.status}`}
-                  style={{ display: "inline-block", marginTop: "0.375rem", padding: "2px 10px", borderRadius: "9999px", fontSize: "0.75rem" }}>
-                  {blossom.status}
-                </span>
-                <div style={{ fontSize: "0.75rem", color: "#6b7280", marginTop: "0.25rem" }}>
-                  Peak: {blossom.peak_date}
-                </div>
-              </>
-            ) : (
-              <div style={{ color: "#9ca3af", fontSize: "0.875rem" }}>No blossom data</div>
-            )}
-          </div>
+          <CityBlossomSection slug={slug} />
         </div>
 
         {/* Today's schedule (if in city today) */}

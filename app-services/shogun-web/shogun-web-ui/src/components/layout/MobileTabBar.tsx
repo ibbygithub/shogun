@@ -6,9 +6,9 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/dashboard", label: "Home",     icon: "🏠" },
   { href: "/calendar",  label: "Calendar", icon: "📅" },
+  { href: "/planning",  label: "Planning", icon: "📋" },
   { href: "/pois",      label: "Places",   icon: "📍" },
   { href: "/chat",      label: "Chat",     icon: "💬" },
-  { href: "/wishlist",  label: "Wishlist", icon: "⭐" },
 ];
 
 export default function MobileTabBar() {

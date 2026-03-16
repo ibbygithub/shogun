@@ -18,6 +18,9 @@ function wmoIcon(code: number): string {
   return WMO_ICONS[code] ?? "🌡️";
 }
 
+// Convert Celsius to Fahrenheit, rounded to nearest integer
+function toF(c: number): number { return Math.round(c * 9/5 + 32); }
+
 interface Props {
   city: string;
 }
@@ -54,10 +57,13 @@ export default function WeatherWidget({ city }: Props) {
       <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
         <span style={{ fontSize: "2.5rem" }}>{wmoIcon(weather.current.weather_code)}</span>
         <div>
-          <div style={{ fontSize: "1.75rem", fontWeight: 700 }}>
+          <div style={{ fontSize: "1.75rem", fontWeight: 700, lineHeight: 1 }}>
+            {toF(weather.current.temperature_2m)}°F
+          </div>
+          <div style={{ fontSize: "0.85rem", color: "#6b7280", lineHeight: 1.2 }}>
             {Math.round(weather.current.temperature_2m)}°C
           </div>
-          <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+          <div style={{ fontSize: "0.75rem", color: "#6b7280", marginTop: "0.15rem" }}>
             Wind {Math.round(weather.current.wind_speed_10m)} km/h
           </div>
         </div>
@@ -73,8 +79,8 @@ export default function WeatherWidget({ city }: Props) {
               {new Date(day.date + "T12:00:00").toLocaleDateString("en", { weekday: "short" })}
             </div>
             <div style={{ fontSize: "1.25rem" }}>{wmoIcon(day.weather_code)}</div>
-            <div style={{ fontSize: "0.75rem", fontWeight: 600 }}>{Math.round(day.temperature_max)}°</div>
-            <div style={{ fontSize: "0.7rem", color: "#94a3b8" }}>{Math.round(day.temperature_min)}°</div>
+            <div style={{ fontSize: "0.75rem", fontWeight: 600 }}>{toF(day.temperature_max)}°F</div>
+            <div style={{ fontSize: "0.7rem", color: "#94a3b8" }}>{toF(day.temperature_min)}°F</div>
           </div>
         ))}
       </div>

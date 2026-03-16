@@ -80,6 +80,11 @@ export const api = {
     exchangeRate: () => apiFetch("/api/ambient/exchange-rate"),
     calendar: () => apiFetch("/api/ambient/calendar"),
   },
+  planning: {
+    itinerary: () => apiFetch<Record<string, unknown[]>>("/planning/itinerary"),
+    schedule: (body: { date: string; poi_name: string; city: string; notes: string }) =>
+      apiFetch("/planning/schedule", { method: "POST", body: JSON.stringify(body) }),
+  },
   admin: {
     health: () => apiFetch("/admin/health"),
   },

@@ -26,6 +26,9 @@ function conditionsIcon(conditions: string): string {
   return "🌡️";
 }
 
+// Convert Celsius to Fahrenheit, rounded to nearest integer
+function toF(c: number): number { return Math.round(c * 9/5 + 32); }
+
 interface ForecastDay {
   date: string;
   max: number;
@@ -106,15 +109,18 @@ export default function WeatherCard({ data, loading }: Props) {
         <span style={{ fontSize: "2.25rem" }}>{icon}</span>
         <div>
           <div style={{ fontSize: "1.75rem", fontWeight: 700, lineHeight: 1 }}>
+            {toF(data.temp_c)}°F
+          </div>
+          <div style={{ fontSize: "0.85rem", color: "#6b7280", lineHeight: 1.2 }}>
             {Math.round(data.temp_c)}°C
           </div>
-          <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+          <div style={{ fontSize: "0.75rem", color: "#6b7280", marginTop: "0.15rem" }}>
             {data.conditions}
           </div>
         </div>
         <div style={{ marginLeft: "auto", textAlign: "right" }}>
           <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>
-            ↑{Math.round(data.temp_max)}° ↓{Math.round(data.temp_min)}°
+            ↑{toF(data.temp_max)}°F ↓{toF(data.temp_min)}°F
           </div>
           {data.precip_mm > 0 && (
             <div style={{ fontSize: "0.75rem", color: "#3b82f6" }}>
@@ -145,8 +151,8 @@ export default function WeatherCard({ data, loading }: Props) {
                 {new Date(day.date + "T12:00:00").toLocaleDateString("en", { weekday: "short" })}
               </div>
               <div style={{ fontSize: "1.1rem" }}>{conditionsIcon(day.conditions)}</div>
-              <div style={{ fontSize: "0.75rem", fontWeight: 600 }}>{Math.round(day.max)}°</div>
-              <div style={{ fontSize: "0.65rem", color: "#94a3b8" }}>{Math.round(day.min)}°</div>
+              <div style={{ fontSize: "0.75rem", fontWeight: 600 }}>{toF(day.max)}°F</div>
+              <div style={{ fontSize: "0.65rem", color: "#94a3b8" }}>{toF(day.min)}°F</div>
             </div>
           ))}
         </div>
