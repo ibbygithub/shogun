@@ -104,6 +104,19 @@ export interface ChatMessage {
   timestamp: number | null;
 }
 
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: number;
+  last_at: number;
+  message_count: number;
+}
+
+export interface ConversationList {
+  conversations: Conversation[];
+  current_id: string | null;
+}
+
 export interface UpcomingLeg {
   leg: number;
   title: string;

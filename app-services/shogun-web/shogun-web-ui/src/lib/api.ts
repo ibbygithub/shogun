@@ -68,7 +68,12 @@ export const api = {
   chat: {
     send: (message: string) =>
       apiFetch("/chat", { method: "POST", body: JSON.stringify({ message }) }),
-    history: () => apiFetch("/chat/history"),
+    history: () => apiFetch<import("./types").ChatMessage[]>("/chat/history"),
+    conversations: () => apiFetch<import("./types").ConversationList>("/chat/conversations"),
+    newConversation: () => apiFetch<import("./types").Conversation>("/chat/conversations", { method: "POST" }),
+    deleteConversation: (id: string) => apiFetch<{ok:boolean}>(`/chat/conversations/${id}`, { method: "DELETE" }),
+    activateConversation: (id: string) => apiFetch<{id:string, messages:import("./types").ChatMessage[]}>(`/chat/conversations/${id}/activate`, { method: "POST" }),
+    clearHistory: () => apiFetch<{ok:boolean}>("/chat/history", { method: "DELETE" }),
   },
   ambient: {
     summary: () => apiFetch("/api/ambient/summary"),
