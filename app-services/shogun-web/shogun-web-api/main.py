@@ -19,6 +19,7 @@ from routers import (
     knowledge,
     admin,
     settings,
+    ambient,
 )
 
 app = FastAPI(title="Shogun Web API", version="1.0.0")
@@ -48,6 +49,7 @@ app.include_router(chat.router)
 app.include_router(knowledge.router)
 app.include_router(admin.router)
 app.include_router(settings.router)
+app.include_router(ambient.router)
 
 
 @app.get("/health")
