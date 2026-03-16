@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import uuid
 import httpx
 from datetime import datetime, date, timezone, timedelta
 from fastapi import APIRouter, Request, Depends
@@ -14,6 +15,18 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 LLM_GATEWAY  = os.getenv("LLM_GATEWAY_URL", "http://platform-llm-gateway:8080")
 TAVILY_GW    = os.getenv("TAVILY_GATEWAY_URL", "http://platform-tavily:8084")
 HISTORY_TTL  = 86400  # 24 hours
+
+CONV_LIST_TTL = 60 * 60 * 24 * 30   # 30 days
+CONV_MSG_TTL  = 60 * 60 * 24        # 24h rolling
+
+# Chat conversation API contract:
+# GET  /chat/conversations              → {conversations: [{id,title,created_at,last_at,message_count}], current_id}
+# POST /chat/conversations              → creates new, returns conv object
+# DELETE /chat/conversations/{id}       → deletes conversation + messages
+# POST /chat/conversations/{id}/activate → switches active conv, returns {id, messages:[]}
+# DELETE /chat/history                  → clears current conv messages
+# GET  /chat/history                    → returns current conv messages (unchanged)
+# POST /chat                            → send message in current conv (unchanged)
 
 # Japan Standard Time
 _JST = timezone(timedelta(hours=9))
@@ -291,13 +304,85 @@ def _tavily_search(query: str, city: str, max_results: int = 3) -> list[str]:
         return []
 
 
-def _history_key(user_id: int) -> str:
-    return f"shogun:web:{user_id}:chat"
+# ---------------------------------------------------------------------------
+# Per-conversation Valkey helpers
+# ---------------------------------------------------------------------------
+
+def _conv_list_key(user_id: int) -> str:
+    return f"shogun:web:{user_id}:conversations"
+
+
+def _conv_msg_key(user_id: int, conv_id: str) -> str:
+    return f"shogun:web:{user_id}:chat:{conv_id}"
+
+
+def _current_conv_key(user_id: int) -> str:
+    return f"shogun:web:{user_id}:current_conv"
+
+
+def _load_conv_list(user_id: int) -> list[dict]:
+    cache = get_cache()
+    raw = cache.get(_conv_list_key(user_id))
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except Exception:
+        return []
+
+
+def _save_conv_list(user_id: int, convs: list[dict]) -> None:
+    cache = get_cache()
+    cache.setex(_conv_list_key(user_id), CONV_LIST_TTL, json.dumps(convs))
+
+
+def _get_or_create_current_conv(user_id: int) -> str:
+    """
+    Return the current conversation ID for this user.
+    On first call (no current_conv key), migrate any legacy history or create
+    a fresh conversation, then persist the new ID.
+    """
+    cache = get_cache()
+    conv_id = cache.get(_current_conv_key(user_id))
+    if conv_id:
+        if isinstance(conv_id, bytes):
+            conv_id = conv_id.decode()
+        return conv_id
+
+    # Check for legacy history (old single-key scheme)
+    legacy_key = f"shogun:web:{user_id}:chat"
+    legacy_raw = cache.get(legacy_key)
+
+    new_id = str(uuid.uuid4())
+    now = time.time()
+
+    if legacy_raw:
+        try:
+            legacy_msgs = json.loads(legacy_raw)
+        except Exception:
+            legacy_msgs = []
+        title = "Previous conversation"
+        count = len(legacy_msgs)
+        # Migrate messages to new per-conversation key
+        cache.setex(_conv_msg_key(user_id, new_id), CONV_MSG_TTL, json.dumps(legacy_msgs))
+        cache.delete(legacy_key)
+    else:
+        title = "New conversation"
+        count = 0
+
+    conv = {"id": new_id, "title": title, "created_at": now, "last_at": now, "message_count": count}
+    convs = _load_conv_list(user_id)
+    convs.insert(0, conv)
+    _save_conv_list(user_id, convs)
+
+    cache.setex(_current_conv_key(user_id), CONV_LIST_TTL, new_id)
+    return new_id
 
 
 def _load_history(user_id: int) -> list[dict]:
+    conv_id = _get_or_create_current_conv(user_id)
     cache = get_cache()
-    raw = cache.get(_history_key(user_id))
+    raw = cache.get(_conv_msg_key(user_id, conv_id))
     if not raw:
         return []
     try:
@@ -307,9 +392,29 @@ def _load_history(user_id: int) -> list[dict]:
 
 
 def _save_history(user_id: int, history: list[dict]) -> None:
+    conv_id = _get_or_create_current_conv(user_id)
     cache = get_cache()
-    cache.setex(_history_key(user_id), HISTORY_TTL, json.dumps(history))
+    cache.setex(_conv_msg_key(user_id, conv_id), CONV_MSG_TTL, json.dumps(history))
 
+    # Update conversation metadata: title (from first user message), count, last_at
+    convs = _load_conv_list(user_id)
+    for conv in convs:
+        if conv["id"] == conv_id:
+            conv["last_at"] = time.time()
+            conv["message_count"] = len(history)
+            # Derive title from first user message if still a default placeholder
+            if conv["title"] in ("New conversation", "Previous conversation"):
+                for msg in history:
+                    if msg["role"] == "user":
+                        conv["title"] = msg["content"][:60] + ("…" if len(msg["content"]) > 60 else "")
+                        break
+            break
+    _save_conv_list(user_id, convs)
+
+
+# ---------------------------------------------------------------------------
+# Chat endpoints
+# ---------------------------------------------------------------------------
 
 @router.post("")
 def chat(body: ChatMessage, request: Request, user: User = Depends(get_current_user)):
@@ -388,3 +493,83 @@ def get_history(request: Request, user: User = Depends(get_current_user)):
         {"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")}
         for h in history
     ]
+
+
+# ---------------------------------------------------------------------------
+# Conversation management endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/conversations")
+def list_conversations(request: Request, user: User = Depends(get_current_user)):
+    """Return all conversations for this user, newest first."""
+    convs = _load_conv_list(user.id)
+    current = get_cache().get(_current_conv_key(user.id))
+    if isinstance(current, bytes):
+        current = current.decode()
+    return {"conversations": convs, "current_id": current}
+
+
+@router.post("/conversations")
+def new_conversation(request: Request, user: User = Depends(get_current_user)):
+    """Create a new conversation and make it current."""
+    cache = get_cache()
+    new_id = str(uuid.uuid4())
+    now = time.time()
+    conv = {"id": new_id, "title": "New conversation", "created_at": now, "last_at": now, "message_count": 0}
+    convs = _load_conv_list(user.id)
+    convs.insert(0, conv)
+    _save_conv_list(user.id, convs)
+    cache.setex(_current_conv_key(user.id), CONV_LIST_TTL, new_id)
+    return conv
+
+
+@router.delete("/conversations/{conv_id}")
+def delete_conversation(conv_id: str, request: Request, user: User = Depends(get_current_user)):
+    """Delete a conversation and its messages."""
+    cache = get_cache()
+    cache.delete(_conv_msg_key(user.id, conv_id))
+    convs = [c for c in _load_conv_list(user.id) if c["id"] != conv_id]
+    _save_conv_list(user.id, convs)
+    # If deleted conversation was current, switch to most recent remaining or clear
+    current = cache.get(_current_conv_key(user.id))
+    if isinstance(current, bytes):
+        current = current.decode()
+    if current == conv_id:
+        if convs:
+            cache.setex(_current_conv_key(user.id), CONV_LIST_TTL, convs[0]["id"])
+        else:
+            cache.delete(_current_conv_key(user.id))
+    return {"ok": True}
+
+
+@router.post("/conversations/{conv_id}/activate")
+def activate_conversation(conv_id: str, request: Request, user: User = Depends(get_current_user)):
+    """Switch the active conversation and return its messages."""
+    from fastapi import HTTPException
+    cache = get_cache()
+    convs = _load_conv_list(user.id)
+    if not any(c["id"] == conv_id for c in convs):
+        raise HTTPException(404, "Conversation not found")
+    cache.setex(_current_conv_key(user.id), CONV_LIST_TTL, conv_id)
+    raw = cache.get(_conv_msg_key(user.id, conv_id))
+    history = json.loads(raw) if raw else []
+    return {
+        "id": conv_id,
+        "messages": [{"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")} for h in history]
+    }
+
+
+@router.delete("/history")
+def clear_current_history(request: Request, user: User = Depends(get_current_user)):
+    """Clear messages in the current conversation (keeps the conversation entry)."""
+    cache = get_cache()
+    conv_id = _get_or_create_current_conv(user.id)
+    cache.delete(_conv_msg_key(user.id, conv_id))
+    convs = _load_conv_list(user.id)
+    for conv in convs:
+        if conv["id"] == conv_id:
+            conv["message_count"] = 0
+            conv["title"] = "New conversation"
+            break
+    _save_conv_list(user.id, convs)
+    return {"ok": True}
