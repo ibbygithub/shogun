@@ -9,16 +9,29 @@ The Telegram bot handles live location-aware recommendations; the web app gives
 Brenda an itinerary editing surface and all three travelers a unified trip view.
 
 **Current infrastructure: all 10 services running on Docker Desktop (Windows laptop).**
-3-node Proxmox lab was lost 2026-03-14. Fully recovered from GitHub on 2026-03-15.
-Migration guide: `outputs/planning/migration-guide.md`
+Laptop stays home in California unattended during the trip (Mar 23–Apr 9).
+Public access via Cloudflare Tunnel → shogun.ibbytech.com (in progress — see blockers).
 Startup/shutdown: `scripts/start-shogun.ps1` / `scripts/stop-shogun.ps1`
 
 ## Infrastructure — Current State (2026-03-15)
-All services running on Docker Desktop. Telegram in polling mode (no public URL needed).
-PostgreSQL runs as a container (was bare metal on dbnode-01).
-shogun-core runs as a container (was systemd on brainnode-01).
-Traefik is disabled — direct port mapping used instead.
-Web UI: http://localhost:3010
+
+All 10 containers validated on Docker Desktop. Both repos pushed to GitHub (develop + master/main).
+
+| Container | Status | Notes |
+|-----------|--------|-------|
+| platform-postgres | healthy | Named volume platform-postgres-data |
+| platform-valkey | running | 127.0.0.1:6379 (localhost only) |
+| platform-llm-gateway | running | Gemini 2.0 Flash |
+| platform-telegram-gateway | running | Polling mode, no public URL needed |
+| platform-places-google | running | Pulls image (harmless warning on build) |
+| platform-tavily | running | |
+| platform-scraper-api | running | |
+| shogun-core | running | Containerized 2026-03-15 (was systemd on brainnode-01) |
+| shogun-web-api | running | SHOGUN_BYPASS_AUTH=true (Cloudflare handles auth) |
+| shogun-web-ui | running | http://localhost:3010 |
+
+**Not running (intentional):** platform-reddit-gateway (DB setup needed first — Phase 1 below)
+**Traefik:** Disabled. Will NOT be restored pre-trip. Cloudflare Tunnel proxies directly to shogun-web-ui:3000.
 
 ## RECOVERY COMPLETE — 2026-03-15
 ✅ All 10 containers running and validated
@@ -29,206 +42,141 @@ Web UI: http://localhost:3010
 ✅ Web AI chat working
 ✅ Database schema applied, Todd seeded (11 itinerary legs, 30 POIs, 8 preferences)
 ✅ Start/stop scripts with directory preservation
+✅ Both repos committed and pushed (develop + master/main)
 
-## Active Work
+## Active Work — Pre-Trip (Departure Mar 23, 8 days)
 
 | Item | Description | Phase | Status | Last Updated |
 |------|-------------|-------|--------|--------------|
-| Disaster recovery — Docker Desktop | Rebuild all platform + shogun services on laptop Docker Desktop | Emergency | In Progress | 2026-03-14 |
-| Claude Code foundation setup | .claude/CLAUDE.md, settings.json, foundation link established | Bootstrap | Complete | 2026-03-12 |
-| Deploy branch resolution | feature/gateway-pure-search-endpoints merged to develop. develop branch established. | Bootstrap | Complete | 2026-03-12 |
-| DNS Infrastructure | All 3 nodes confirmed pointing at Pi-hole. valkey.platform.ibbytech.com resolves on all nodes. | Pre-MVP 3 | Complete | 2026-03-12 |
-| Valkey | Deployed on svcnode-01, 6/6 validation passing | Platform Track 1 | Complete | 2026-03-12 |
-| Tavily platform service | Web search (kanji + English), domain-restricted for Tabelog/Reddit | Platform Track 2 | Complete | 2026-03-13 |
-| Telegram gateway send API | POST /send + GET /health on port 3001. Auth via X-Send-Secret. | Platform Track 3 | Complete | 2026-03-13 |
-| shogun-core Phase 3 | FastAPI on brainnode-01, Gemini pipeline, user profiles, Valkey context | MVP 3 | Complete | 2026-03-13 |
-| Database schema (shogun_v1) | users, user_preferences, trip_itinerary, trip_pois. Todd seeded. | MVP 3 | Complete | 2026-03-13 |
-| shogun-core Phase 4 | Voice, photo, translation, location trigger, RAG pipeline | MVP 4 | Complete | 2026-03-13 |
-| Data ingest | Itinerary, POI by city, Madeline layer | MVP 5 | Complete | 2026-03-13 |
-| Printable itinerary | Standalone bilingual HTML — full trip details | MVP 6 | Not started | 2026-03-13 |
-| shogun-web Phase 1 | Foundation: Next.js + FastAPI on svcnode-01, auth bypass, internal deploy | Web | Complete | 2026-03-14 |
-| shogun-web Phase 2 | shogun-web-api: all DB + weather + blossom + reminders endpoints | Web | Complete | 2026-03-14 |
-| shogun-web Phase 3 | Per-city themed entry pages: tokyo, nara, osaka, kyoto (visual centerpiece) | Web | Complete | 2026-03-14 |
-| shogun-web Phase 4 | Calendar + Itinerary pages with edit mode | Web | Complete | 2026-03-14 |
-| shogun-web Phase 5 | Dashboard + weather widget + blossom tracker + AI chat | Web | Complete | 2026-03-14 |
-| shogun-web Phase 6 | POI knowledge base + YouTube search links + inline Shogun chat | Web | Complete | 2026-03-14 |
-| shogun-web Phase 7 | Day-specific trip reminders integrated throughout app | Web | Complete | 2026-03-14 |
-| shogun-web Phase 8 | Wishlist pipeline (Madeline submit, Todd/Brenda approve) | Web | Complete | 2026-03-14 |
-| shogun-web Phase 9 | Settings + Admin panel | Web | Complete | 2026-03-14 |
-| shogun-web CF cutover | Cloudflare Tunnel + Access + Google IdP — Todd's external items | Web | Blocked: Todd | 2026-03-13 |
+| Cloudflare Tunnel + Access | Public access to shogun.ibbytech.com from Japan. cloudflared container → web-ui. Google IdP auth. | Public Access | Blocked: Todd DNS + GCP | 2026-03-15 |
+| Reddit Gateway | DB setup (pgvector, reddit schema, reddit_app user), .env Docker Desktop fixes, add to start script | Platform Phase 1 | Not started | 2026-03-15 |
+| shogun-places-ingester | Add docker-compose.yml, wire up to platform_net, one-shot run for Osaka/Nara/Kanazawa/Tokyo neighborhoods | Platform Phase 2 | Not started | 2026-03-15 |
+| Japan Knowledge Data Lake | New table knowledge_items in shogun_v1. Ingest pipeline: Tavily (Tabelog), Scraper, Reddit, Practical. | Data Lake Phase 3 | Not started | 2026-03-15 |
+| RAG pipeline update | shogun-core to query knowledge_items alongside trip_pois for richer location responses | Data Lake Phase 3 | Not started | 2026-03-15 |
+| Laptop reliability (unattended) | Windows power settings, Docker Desktop auto-start, Windows Update mitigation | Ops | Not started | 2026-03-15 |
+| Printable itinerary | Standalone bilingual HTML — full trip details | MVP 6 | Not started | 2026-03-15 |
 
-## Open Decisions
+## Cloudflare Tunnel Plan — Decision Log (2026-03-15)
 
-- **Valkey deployment:** ✅ Deployed 2026-03-12. DNS confirmed all nodes.
-- **shogun-core FQDN:** Will be `svcnode-01.ibbytech.com:8082` for internal access. Public FQDN (`shogun.ibbytech.com`) deferred until Cloudflare phase.
-- **Conversation context TTL:** ✅ 24h idle TTL confirmed 2026-03-12.
-- **User profile storage:** ✅ Confirmed 2026-03-12 — dietary, likes, dislikes stored as trip-long constants in shogun_v1 DB. Schema design pending.
-- **Location trigger threshold:** ✅ 150m + 5-minute cooldown confirmed 2026-03-12.
-- **LLM model:** Gemini 2.0 Flash confirmed.
+### Architecture decision
+- **Option chosen:** Cloudflare Tunnel + Access (Option C) — public access from Japan
+- **Traefik:** NOT needed. cloudflared container proxies directly to `http://shogun-web-ui:3000`
+- **Auth:** Cloudflare Access + Google IdP. App keeps `SHOGUN_BYPASS_AUTH=true` — Cloudflare is the auth wall.
+- **Flow:** Phone in Japan → shogun.ibbytech.com → Cloudflare edge → Access auth → Tunnel → cloudflared → shogun-web-ui:3000
 
-## Web Frontend Open Blockers (Pre-F1 Checklist)
+### What Todd must do first (browser work, no code)
+1. **Move ibbytech.com DNS to Cloudflare nameservers** — change in Namecheap → Domain → Nameservers.
+   Currently DNS is Namecheap-managed. Cloudflare Access REQUIRES the zone on Cloudflare DNS.
+   Allow 24-48h propagation (usually faster). This is the longest lead-time item — do it first.
+2. **Cloudflare Zero Trust** — dash.cloudflare.com → Zero Trust → enable free tier (up to 50 users)
+   → Networks → Tunnels → Create tunnel → name it `shogun-laptop` → choose Docker connector → copy TUNNEL_TOKEN
+   → Add public hostname: `shogun.ibbytech.com` → Service: `http://shogun-web-ui:3000`
+3. **Google Cloud Console** — check https://console.cloud.google.com for existing project.
+   Need OAuth 2.0 client ID + secret for Cloudflare Access Google IdP.
+4. **Cloudflare Access Application** — attach Google IdP, set policy to allow specific Google emails.
 
-- **ibbytech.com DNS zone in Cloudflare:** TBD — Todd to confirm
-- **Cloudflare Zero Trust (free tier):** TBD — Todd to enable
-- **Google Cloud project + OAuth client ID + secret:** TBD — Todd to create
-- **svcnode-01 outbound port 443 for cloudflared:** TBD — Todd to confirm
-- **Brenda and Madeline Google email addresses:** TBD
-- **Brenda and Madeline Telegram IDs:** TBD — needed for Phase 7 hardening, not F1–F4
-- **wishlist_items DB schema:** Not yet deployed to dbnode-01 — needed before Phase F2
-- **Kyoto/Sakai itinerary dates:** TBD
-- **Madeline anime franchises beyond Ghibli:** TBD
+### What Claude Code does after Todd has TUNNEL_TOKEN
+- Add cloudflared Docker container to `platform/infra/compose/docker-compose.infra.yml`
+- One env var: TUNNEL_TOKEN
+- Add to start-shogun.ps1 (starts with infra layer)
+- Test from phone
 
-## DNS Infrastructure — Decision
+## Blockers (Cloudflare)
 
-- **DNS manager on lab nodes:** systemd-resolved (confirmed active, /etc/resolv.conf is symlink)
-- **Current DNS:** 192.168.68.1 (router) → public DNS. Pi-holes (192.168.71.110, .115) NOT in use on lab nodes.
-- **Namecheap A records:** Point to private IPs (192.168.71.220). Resolution works today via public DNS chain.
-- **Decision:** Point all lab nodes at Pi-hole for DNS. Add local DNS records in Pi-hole for node FQDNs. Do NOT add node FQDNs to Namecheap (private IPs don't belong in public DNS).
-- **Node FQDNs to set:**
-  - svcnode-01 → 192.168.71.220
-  - dbnode-01 → 192.168.71.221
-  - brainnode-01 → 192.168.71.222
-- **Procedure:** Edit `/etc/systemd/resolved.conf` on each node (requires root). Awaiting `cat /etc/systemd/resolved.conf` + `resolvectl status` output from svcnode-01 before issuing exact commands.
+- **ibbytech.com DNS zone on Cloudflare:** ❌ Currently Namecheap-managed — Todd must move nameservers
+- **Cloudflare Zero Trust enabled:** TBD — Todd
+- **TUNNEL_TOKEN obtained:** TBD — Todd (from Zero Trust dashboard after creating tunnel)
+- **Google Cloud OAuth client ID + secret:** TBD — Todd (check console.cloud.google.com for existing project)
+- **Brenda and Madeline Google email addresses:** TBD — needed for Access policy
+- **Brenda and Madeline Telegram IDs:** TBD — needed for seeding user profiles
+
+## Laptop Unattended Risk (Mar 23–Apr 9)
+
+| Risk | Mitigation |
+|------|------------|
+| Windows Update auto-restart | Set maintenance window to 3-5am, disable auto-restart |
+| Docker Desktop not starting after reboot | Enable "Start Docker Desktop when you log in" + Windows auto-login |
+| Laptop sleeps | Power settings: disable sleep on AC power, screen off is OK |
+| Power outage | Nothing to do — acknowledge risk |
+
+## Data Lake Plan — Phase 3 (post Reddit + places-ingester)
+
+**New table:** `shogun_v1.public.knowledge_items` (city, topic, source_url, content_summary, raw_content, ingested_utc)
+
+**Ingest sources:**
+| Layer | Tool | Content |
+|-------|------|---------|
+| Google Places depth | shogun-places-ingester | Osaka Tenjinbashi, Nara center, Kanazawa Higashi Chaya, Tokyo Sugamo |
+| Tabelog restaurant data | Tavily (domain:tabelog.com) + Scraper | Top restaurants near each accommodation |
+| Reddit intel | Reddit gateway | r/JapanTravel, r/osaka, r/Tokyo — last 90 days |
+| Practical travel | Tavily (EN+JP) | IC card, 2026 sakura forecast by city, pharmacy kanji |
+
+**Ingest script:** `shogun-core/tools/ingest_knowledge.py --city osaka` (re-runnable, one-shot)
+**Final re-run:** Mar 22 (day before departure) for latest sakura forecasts + Reddit intel
+
+## Trip Itinerary Reference
+
+| Leg | Date | City | Title |
+|-----|------|------|-------|
+| 1-2 | Mar 23 | SFO→LAX→KIX | Flights — arrive Osaka area |
+| 3 | Mar 24 | Osaka | Tenjinbashi Queen Airbnb — check in |
+| 4 | Mar 25 | Nara | Day trip — deer park, Todai-ji, Kasugataisha |
+| 5 | Mar 26 | Osaka | Universal Studios Japan — Nintendo World |
+| 6 | Mar 30 | Osaka→Kanazawa | Transit |
+| 7 | Mar 30 | Kanazawa | Hotel Sanraku Kanazawa |
+| 8 | Apr 1 | Kanazawa→Tokyo | Transit |
+| 9 | Apr 1 | Tokyo | Sugamo Airbnb (Toshima-ku) |
+| 10 | Apr 3 | Tokyo | Ghibli Museum — Mitaka (TIMED ENTRY NOON) |
+| 11 | Apr 9 | Tokyo→SFO | JL2 HND → SFO |
+
+POIs seeded: 30 total — osaka(6), tokyo(10), nara(4), kanazawa(4), kyoto(5), sakai(1)
 
 ## Technology Registry
 
 | Technology | Role in this project | Rationale | Date |
 |------------|----------------------|-----------|------|
-| Python / FastAPI | shogun-core (brainnode-01) + shogun-web-api (svcnode-01) | Consistent with platform services; async-capable | 2026-03-10 |
-| Valkey 8.x | Shared platform cache / session store | Apache 2.0, Redis-protocol-compatible, Linux Foundation governed. | 2026-03-10 |
-| PostgreSQL 17 | Persistent place storage | Already in use via platform (dbnode-01). | 2026-03-10 |
-| Telegram Gateway (platform) | Event ingress | Platform service at telegram.platform.ibbytech.com | 2026-03-10 |
-| Places Gateway (platform) | Place discovery | Platform service at places.platform.ibbytech.com | 2026-03-10 |
-| LLM Gateway (platform) | Chat + intent detection | Platform service at llm.platform.ibbytech.com | 2026-03-10 |
-| Next.js (React SSR) | shogun-web-ui frontend Docker on svcnode-01 | SSR = fast on mobile; NextAuth.js for OAuth | 2026-03-13 |
+| Python / FastAPI | shogun-core + shogun-web-api | Consistent with platform services; async-capable | 2026-03-10 |
+| Valkey 8.x | Conversation context per user (24h idle TTL) | Apache 2.0, Redis-protocol compatible | 2026-03-10 |
+| PostgreSQL 17 | User profiles, itinerary, trip POIs, knowledge items | Platform standard | 2026-03-10 |
+| Gemini 2.0 Flash | LLM completions, intent detection, vision, voice transcription | Multimodal | 2026-03-09 |
+| Telegram bot | User interface — text, voice, photo, location | Polling mode — no public URL needed | 2026-03-09 |
+| Next.js (React SSR) | shogun-web-ui frontend | SSR fast on mobile | 2026-03-13 |
 | Cloudflare Access + Google IdP | Web authentication (edge-level) | Auth at edge; app never handles credentials | 2026-03-13 |
-| Cloudflare Tunnel (cloudflared) | Public exposure of shogun.ibbytech.com | No inbound ports; works with dynamic home IP | 2026-03-13 |
-| Open-Meteo | Weather data (free, no API key) | No rate limits; accurate; Valkey-cached 30min | 2026-03-13 |
-| CSS custom properties | Design system theming | Theme swap = 8 variable changes in globals.css | 2026-03-13 |
+| Cloudflare Tunnel (cloudflared) | Public exposure of shogun.ibbytech.com — Docker container | No inbound ports; works with dynamic home IP; NO Traefik needed | 2026-03-15 |
+| Open-Meteo | Weather data (free, no API key) | No rate limits; Valkey-cached 30min | 2026-03-13 |
+| Tavily | Web search — kanji + English, Tabelog domain search | TAVILY_API_KEY required | 2026-03-12 |
 
 ## Decision Log
 
-### Location trigger threshold — 2026-03-12
-- Capability need: When should Shogun trigger a new location-based recommendation
-- Decision: 150m radius + 5-minute cooldown
-- Reasoning: 150m covers 2-3 city blocks in central Tokyo — intentional movement,
-  not GPS drift. 5-minute cooldown prevents interruption spam while actively
-  exploring. Live Telegram location sharing means Shogun always has current position.
-- Risk accepted: Fast transitions (e.g., subway) may trigger on arrival at each
-  station. Acceptable — station areas are valid recommendation contexts.
+### Traefik — deferred permanently (pre-trip) — 2026-03-15
+- Decision: Traefik will NOT be restored before the Japan trip
+- Reasoning: Services communicate via container names on platform_net — no routing needed.
+  Cloudflare Tunnel proxies directly to shogun-web-ui:3000 — Traefik adds no value here.
+  Complexity/risk not justified with 8 days to departure.
+- Re-evaluation: Restore when Proxmox lab is rebuilt post-trip (3-node separation).
+  Compose config is already written — it's a re-enable, not a rewrite.
 
-### Conversation context TTL — 2026-03-12
-- Capability need: How long to retain conversation context in Valkey
-- Decision: 24h idle TTL. Each message resets the TTL.
-- Reasoning: Live Telegram location sharing means location is never stale.
-  24h covers a full travel day including sleep. Preferences that are
-  trip-long constants (dietary, likes, dislikes) are stored in the DB,
-  not in Valkey — so expiry of Valkey context only loses conversation thread
-  history, not user preferences.
-- Risk accepted: A 25h+ silence mid-trip clears conversation thread history.
-  Acceptable — user restates context naturally in next message.
+### Cloudflare Tunnel architecture — 2026-03-15
+- Capability need: External access to shogun.ibbytech.com from Japan (phones, laptop)
+- Options: (A) Traefik + mkcert internal only; (B) Traefik + LAN DNS; (C) Cloudflare Tunnel direct
+- Decision: Option C — cloudflared container → shogun-web-ui:3000 directly
+- No Traefik required. SHOGUN_BYPASS_AUTH stays true — Cloudflare Access is the auth layer.
+- Risk: ibbytech.com DNS must move from Namecheap to Cloudflare. Allow 48h propagation.
+- Risk: Laptop unattended for 17 days. Windows reliability mitigations required (see above).
 
-### User profile storage — 2026-03-12
-- Capability need: Where to store dietary restrictions, likes, dislikes
-- Decision: shogun_v1 DB as trip-long constants. Not in Valkey TTL context.
-- Reasoning: These preferences are stable across a trip. Storing in Valkey
-  risks losing them on TTL expiry. DB is the right home for persistent
-  user-level data.
-- Schema needed: `users` and `user_preferences` tables in shogun_v1.public.
-  Design deferred to shogun-core build task.
-- Risk accepted: None — no existing schema to migrate.
-
-### Google Places routing — 2026-03-12
-- Capability need: Canonical home for Google Places data
-- Decision: `platform_v1.places` is canonical. Shogun does NOT write place data
-  to shogun_v1. Reads via Google Places REST gateway only.
-- `shogun_v1.places` schema dropped 2026-03-12.
-- Tables: `google_places`, `google_place_snapshots`, `neighborhood_anchors` — all in platform_v1.
-- Risk accepted: None — Shogun was already using the gateway; no data lost (test data only).
-
-### Platform-services removal — 2026-03-10
-- Capability need: Clarify what Shogun owns vs. what platform owns
-- Options considered: Keep copies in shogun repo; remove and rely on platform
-- Decision: Remove platform-services/ from shogun repo entirely
-- Reasoning: llm-gateway, places-google, and telegram-ingress are all deployed
-  from the platform repo. Shogun copies were older, diverged versions. Platform
-  is the source of truth.
-- Risk accepted: None — platform services are confirmed running.
-
-### Shogun as reference consumer — 2026-03-10
-- Capability need: Architectural principle for what goes in platform vs. shogun
-- Decision: Every time Shogun needs a capability, evaluate it as a platform
-  service first. Shogun is client one; future apps follow.
-- Reasoning: Prevents app-level sprawl; builds platform capability incrementally
-  from real use cases rather than speculation.
-- Risk accepted: Slight overhead on each new capability decision. Acceptable.
-
-### Valkey over Redis — 2026-03-10
-- Capability need: Fast shared session/state store for shogun-core and future platform consumers
-- Options considered: Redis 7.2 (BSD), Redis 7.4+ (SSPL), Valkey 8.x (Apache 2.0), Redis Stack, Memcached
-- Decision: Valkey 8.x as a shared platform service
-- Reasoning: Protocol- and client-identical to Redis. Apache 2.0 licensing is
-  enterprise-appropriate for a long-term platform. Linux Foundation governance
-  (AWS, Google, Oracle backing) makes it the more durable choice. No migration
-  cost — same client libraries, same wire protocol.
-- Risk accepted: Slightly less name recognition than Redis operationally.
-  No technical risk.
-
-### Processing model — 2026-03-10
-- Decision: Inline (synchronous) processing for MVP
-- Reasoning: Single-user. Queue infrastructure adds operational complexity with
-  no benefit at this scale.
-- Risk accepted: If processing takes too long, Telegram gateway will timeout
-  waiting for reply_text. Must ensure LLM calls complete within ~25s.
-
-### Trigger model — 2026-03-10
-- Decision: Combined — live location radius threshold + text commands
-- Reasoning: Location updates drive automatic recommendations; text commands
-  enable explicit requests and conversation.
-
-### LLM role — 2026-03-10
-- Decision: Intent detection + conversation (not just summarization)
-- Reasoning: Allows text commands to be natural language rather than rigid
-  slash-command syntax. Enables Shogun to feel like a concierge rather than
-  a query tool.
-
-## Backlog
-
-- **OSM Places service:** Platform has no OSM gateway. Shogun had an empty placeholder.
-  Deferred until Google Places coverage proves insufficient.
-- **Queue layer:** If single-user inline proves too slow (LLM timeout), revisit
-  with a lightweight queue. Candidate: Valkey pub/sub (already in platform).
-  Do not add complexity preemptively.
-- **Conversation persistence to Postgres:** Valkey conversation context is
-  ephemeral (TTL-based). If permanent history is needed, add a shogun schema
-  in Postgres. Deferred to post-MVP.
-- **shogun-core FQDN:** Needs confirmation before Telegram gateway is pointed at it.
-- **Multi-region / multi-city Shogun:** Currently Japan-only seeds. Broadening
-  scope is post-MVP.
-
-## Decision Log
-
-### shogun-web architecture — 2026-03-13
-- Capability need: Web interface for trip planning, itinerary editing, and AI chat — accessible from home and Japan via phone
-- Options considered: (Web API) shogun-core extension vs. dedicated shogun-web-api; (Auth) NextAuth.js+Google OAuth vs. Cloudflare Access+Google IdP; (Tunnel) Cloudflare Tunnel vs. open inbound port; (Frontend) Next.js vs. other SSR options
-- Decisions: shogun-web-api FastAPI Docker on svcnode-01; Next.js Docker on svcnode-01; Cloudflare Access + Google IdP; Cloudflare Tunnel
-- Reasoning: Clean separation from shogun-core (web API failure doesn't affect Telegram bot); Cloudflare Access = auth at the edge, app never handles credentials; Tunnel = no router config, works with dynamic home IP; Next.js = SSR fast on mobile, NextAuth trivial
-- AI chat: Separate web context per user (shogun:web:{user_id}) from Telegram context — different use cases, same intelligence
-- Roles: Todd + Brenda = admin/edit; Madeline = read-only + wishlist submission
-
-### shogun-web design system — 2026-03-13
-- Decision: CSS custom properties in globals.css; Tailwind references variables
-- Colors: navy #1e2d4a (primary), torii red #c0392b (accent), gold #c9a84c (highlight), warm white #faf9f7 (surface)
-- Typography: Inter UI, JetBrains Mono for codes/addresses
-- Layout: fixed left sidebar desktop, bottom tab bar mobile
-- Rationale: Full theme swap = 8 variable changes in one file, no component edits
+### Laptop as production host — 2026-03-15
+- Decision: Windows laptop stays home in California, running Docker Desktop, for Mar 23–Apr 9
+- Reasoning: Fastest path. No VPS cost. cloudflared handles dynamic IP and reconnection.
+- Risk accepted: Windows Update reboot could take down all services. Mitigation: maintenance window + auto-start config.
+- Alternative considered: Hetzner CX22 VPS (~$4/mo). Deferred — user may switch before departure.
 
 ## Planning Documents
 
 | Document | Path | Status |
 |----------|------|--------|
-| Shogun Reboot Plan | outputs/planning/shogun-reboot-plan.md | Draft |
-| Risk Register | outputs/planning/shogun-risks.md | Draft |
-| Shogun Web Plan | outputs/planning/shogun-web-plan.md | Approved — Updated 2026-03-13 |
+| Migration Guide | outputs/planning/migration-guide.md | Complete |
+| Disaster Recovery Checklist | outputs/planning/disaster-recovery-checklist.md | Complete |
+| Shogun Web Plan | outputs/planning/shogun-web-plan.md | Approved |
 | City Theme Specification | outputs/planning/shogun-web-city-themes.md | Approved |
-| Coding Agent Execution Brief | outputs/planning/shogun-web-agent-brief.md | Approved — Primary execution document |
+| Coding Agent Execution Brief | outputs/planning/shogun-web-agent-brief.md | Approved |
+| Risk Register | outputs/planning/shogun-risks.md | Draft |
