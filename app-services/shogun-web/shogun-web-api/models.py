@@ -59,6 +59,9 @@ class WishlistItem(BaseModel):
     reviewed_at: Optional[datetime]
     itinerary_note: Optional[str]
     created_utc: datetime
+    category: Optional[str] = "general"
+    needs_reservation: bool = False
+    reservation_confirmed: bool = False
 
 
 class WishlistCreate(BaseModel):

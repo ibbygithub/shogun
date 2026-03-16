@@ -19,6 +19,9 @@ def _row_to_item(row) -> WishlistItem:
         reviewed_at=row[7],
         itinerary_note=row[8],
         created_utc=row[9],
+        category=row[10],
+        needs_reservation=row[11],
+        reservation_confirmed=row[12],
     )
 
 
@@ -30,7 +33,8 @@ def get_wishlist(request: Request, user: User = Depends(get_current_user)):
                 cur.execute(
                     """
                     SELECT id, requested_by, city, description, ai_research,
-                           status, reviewed_by, reviewed_at, itinerary_note, created_utc
+                           status, reviewed_by, reviewed_at, itinerary_note, created_utc,
+                           category, needs_reservation, reservation_confirmed
                     FROM wishlist_items ORDER BY created_utc DESC
                     """
                 )
@@ -38,7 +42,8 @@ def get_wishlist(request: Request, user: User = Depends(get_current_user)):
                 cur.execute(
                     """
                     SELECT id, requested_by, city, description, ai_research,
-                           status, reviewed_by, reviewed_at, itinerary_note, created_utc
+                           status, reviewed_by, reviewed_at, itinerary_note, created_utc,
+                           category, needs_reservation, reservation_confirmed
                     FROM wishlist_items WHERE requested_by=%s ORDER BY created_utc DESC
                     """,
                     (user.id,),
@@ -98,3 +103,35 @@ def reject_item(item_id: int, request: Request, user: User = Depends(get_current
             if not cur.fetchone():
                 raise HTTPException(status_code=404, detail="Item not found")
     return {"rejected": item_id}
+
+
+@router.patch("/{item_id}/reservation")
+def toggle_reservation(item_id: int, request: Request, user: User = Depends(get_current_user)):
+    """Toggle needs_reservation flag on a wishlist item."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE wishlist_items SET needs_reservation = NOT needs_reservation WHERE id = %s RETURNING id, needs_reservation",
+                (item_id,)
+            )
+            row = cur.fetchone()
+            conn.commit()
+    if not row:
+        raise HTTPException(404, "Item not found")
+    return {"id": row[0], "needs_reservation": row[1]}
+
+
+@router.patch("/{item_id}/reservation-confirmed")
+def toggle_reservation_confirmed(item_id: int, request: Request, user: User = Depends(get_current_user)):
+    """Toggle reservation_confirmed flag."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE wishlist_items SET reservation_confirmed = NOT reservation_confirmed WHERE id = %s RETURNING id, reservation_confirmed",
+                (item_id,)
+            )
+            row = cur.fetchone()
+            conn.commit()
+    if not row:
+        raise HTTPException(404, "Item not found")
+    return {"id": row[0], "reservation_confirmed": row[1]}
