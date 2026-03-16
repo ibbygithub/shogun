@@ -8,6 +8,7 @@ import WeatherWidget from "@/components/widgets/WeatherWidget";
 import BlossomWidget from "@/components/widgets/BlossomWidget";
 import RemindersPanel from "@/components/reminders/RemindersPanel";
 import PoiCard from "@/components/pois/PoiCard";
+import PoisMap from "@/components/pois/PoisMap";
 import { Poi } from "@/lib/types";
 
 async function getCityData(slug: string) {
@@ -17,9 +18,12 @@ async function getCityData(slug: string) {
     api.blossom.list() as Promise<BlossomEntry[]>,
   ]);
 
+  const allPois = pois.status === "fulfilled" ? pois.value : [];
+
   return {
     legs: legs.status === "fulfilled" ? legs.value : [],
-    pois: pois.status === "fulfilled" ? pois.value.slice(0, 6) : [],
+    // all POIs passed through — city page shows first 6 in cards, all on the map
+    pois: allPois,
     blossom: blossom.status === "fulfilled" ? blossom.value.find((b) => b.city === slug) : null,
   };
 }
@@ -40,12 +44,53 @@ export default async function CityPage({ params }: { params: { slug: string } })
   // What to bring checklist
   const CHECKLIST = ["Passport", "Cash (¥)", "IC Card (Suica)", "Slip-on shoes", "Phone charger"];
 
+  // Mappable POIs for the map (all with coords); card grid shows first 6
+  const mappablePois = pois.filter(
+    (p) => typeof p.lat === "number" && p.lat !== null &&
+           typeof p.lng === "number" && p.lng !== null
+  );
+  const showMap = mappablePois.length > 0;
+
   return (
     <div>
       <CityTheme slug={slug} />
       <CityHero slug={slug} />
 
-      <div style={{ padding: "1.5rem", maxWidth: "900px" }}>
+      <div style={{ padding: "1.5rem", maxWidth: "1100px" }}>
+
+        {/* Map + POI split — highest priority section */}
+        {(showMap || pois.length > 0) && (
+          <div style={{ marginBottom: "1.5rem" }}>
+            <h2 style={{ fontWeight: 700, marginBottom: "0.75rem" }}>Places in {city.name}</h2>
+            {/* Desktop: POI list left, map right. Mobile: map on top, full-width */}
+            <div style={{
+              display: "grid",
+              gap: "1rem",
+              alignItems: "start",
+            }}
+              className="city-map-grid"
+            >
+              {/* POI card list — left column on desktop */}
+              {pois.length > 0 && (
+                <div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "0.75rem" }}>
+                    {pois.slice(0, 6).map((poi) => <PoiCard key={poi.id} poi={poi} />)}
+                  </div>
+                  <a href="/pois" style={{ display: "inline-block", marginTop: "0.75rem", color: "var(--city-accent)", fontSize: "0.875rem", fontWeight: 600 }}>
+                    View all places →
+                  </a>
+                </div>
+              )}
+              {/* Map — right column on desktop, top on mobile */}
+              {showMap && (
+                <div style={{ position: "sticky", top: "1rem" }}>
+                  <PoisMap pois={pois} city={slug} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Context strip */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
           <WeatherWidget city={slug} />
@@ -78,19 +123,6 @@ export default async function CityPage({ params }: { params: { slug: string } })
                 {leg.address_en && <div style={{ fontSize: "0.8rem", color: "#6b7280" }}>{leg.address_en}</div>}
               </div>
             ))}
-          </div>
-        )}
-
-        {/* Top POIs */}
-        {pois.length > 0 && (
-          <div style={{ marginBottom: "1.5rem" }}>
-            <h2 style={{ fontWeight: 700, marginBottom: "0.75rem" }}>Top Places in {city.name}</h2>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "0.75rem" }}>
-              {pois.map((poi) => <PoiCard key={poi.id} poi={poi} />)}
-            </div>
-            <a href="/pois" style={{ display: "inline-block", marginTop: "0.75rem", color: "var(--city-accent)", fontSize: "0.875rem", fontWeight: 600 }}>
-              View all places →
-            </a>
           </div>
         )}
 
@@ -129,6 +161,24 @@ export default async function CityPage({ params }: { params: { slug: string } })
           </a>
         </div>
       </div>
+
+      {/* Responsive layout: desktop = POI list left + map right (50/50), mobile = map top full-width */}
+      <style>{`
+        .city-map-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+        @media (max-width: 767px) {
+          .city-map-grid {
+            grid-template-columns: 1fr;
+          }
+          .city-map-grid > div:last-child {
+            order: -1;
+          }
+          .city-map-grid > div:last-child .leaflet-container {
+            height: 350px !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
