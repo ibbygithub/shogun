@@ -44,6 +44,8 @@ class Poi(BaseModel):
     best_time: Optional[str]
     map_url: Optional[str]
     source: Optional[str]
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 
 class WishlistItem(BaseModel):

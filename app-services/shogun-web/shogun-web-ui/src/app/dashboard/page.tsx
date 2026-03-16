@@ -3,6 +3,7 @@ import WeatherWidget from "@/components/widgets/WeatherWidget";
 import BlossomWidget from "@/components/widgets/BlossomWidget";
 import ShogunHealthCard from "@/components/widgets/ShogunHealthCard";
 import RemindersPanel from "@/components/reminders/RemindersPanel";
+import AmbientDashboard from "@/components/ambient/AmbientDashboard";
 
 export default function DashboardPage() {
   const today = new Date().toISOString().split("T")[0];
@@ -30,6 +31,8 @@ export default function DashboardPage() {
         <TripStatusCard />
         <ShogunHealthCard />
       </div>
+
+      <AmbientDashboard />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
         <WeatherWidget city={todayCity()} />

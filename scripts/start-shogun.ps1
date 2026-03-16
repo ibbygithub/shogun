@@ -23,6 +23,10 @@ Set-Location "$PLATFORM\infra\compose"
 docker compose -f docker-compose.infra.yml up -d
 if ($LASTEXITCODE -ne 0) { Fail "infra failed" }
 
+Step "Cloudflare Tunnel"
+docker compose -f docker-compose.infra.yml up -d cloudflared
+if ($LASTEXITCODE -ne 0) { Fail "cloudflared failed" }
+
 Step "Waiting for Postgres to be healthy..."
 $retries = 0
 do {
@@ -63,6 +67,11 @@ Step "Scraper"
 Set-Location "$PLATFORM\services\scraper"
 docker compose up -d
 if ($LASTEXITCODE -ne 0) { Fail "scraper failed" }
+
+Step "Reddit Gateway"
+Set-Location "$PLATFORM\services\reddit-gateway"
+docker compose up -d
+if ($LASTEXITCODE -ne 0) { Fail "reddit-gateway failed" }
 
 # ── 3. Shogun services ───────────────────────────────────────────────────────
 Step "shogun-core"

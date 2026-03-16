@@ -25,6 +25,9 @@ export interface Poi {
   best_time: string | null;
   map_url: string | null;
   source: string | null;
+  // Added by API enrichment (Agent A) — may be null until enriched
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface WishlistItem {

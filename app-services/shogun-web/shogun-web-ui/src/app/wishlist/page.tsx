@@ -1,11 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import type { WishlistItem } from "@/lib/types";
 import { CITIES } from "@/lib/cities";
 
 const CITY_OPTIONS = ["", ...Object.keys(CITIES)];
+
+interface Toast {
+  msg: string;
+  type: "success" | "error";
+}
 
 export default function WishlistPage() {
   const [items, setItems] = useState<WishlistItem[]>([]);
@@ -13,6 +18,21 @@ export default function WishlistPage() {
   const [desc, setDesc] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [note, setNote] = useState<Record<number, string>>({});
+  const [toast, setToast] = useState<Toast | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(msg: string, type: "success" | "error") {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ msg, type });
+    if (type === "success") {
+      toastTimer.current = setTimeout(() => setToast(null), 3000);
+    }
+  }
+
+  function dismissToast() {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(null);
+  }
 
   function load() {
     api.wishlist.list().then((d) => setItems(d as WishlistItem[]));
@@ -23,11 +43,18 @@ export default function WishlistPage() {
   async function submit() {
     if (!desc.trim()) return;
     setSubmitting(true);
+    const savedDesc = desc.trim();
+    const savedCity = city;
     try {
-      await api.wishlist.create({ city: city || undefined, description: desc });
+      await api.wishlist.create({ city: city || undefined, description: savedDesc });
       setDesc("");
       setCity("");
       load();
+      const cityLabel = savedCity ? ` your ${savedCity}` : "";
+      showToast(`Saved! '${savedDesc}' added to${cityLabel} wishlist.`, "success");
+    } catch (e) {
+      console.error("Wishlist submit failed:", e);
+      showToast("Save failed — please try again.", "error");
     } finally {
       setSubmitting(false);
     }
@@ -67,12 +94,17 @@ export default function WishlistPage() {
           rows={3}
           style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "0.875rem", resize: "vertical" }}
         />
-        <button onClick={submit} disabled={!desc.trim() || submitting}
-          style={{ marginTop: "0.625rem", padding: "0.5rem 1.25rem", background: "var(--city-accent)", color: "white",
-            border: "none", borderRadius: "8px", fontWeight: 700, cursor: "pointer",
-            opacity: !desc.trim() || submitting ? 0.5 : 1 }}>
-          Submit
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "0.625rem" }}>
+          <button onClick={submit} disabled={!desc.trim() || submitting}
+            style={{ padding: "0.5rem 1.25rem", background: "var(--city-accent)", color: "white",
+              border: "none", borderRadius: "8px", fontWeight: 700, cursor: "pointer",
+              opacity: !desc.trim() || submitting ? 0.5 : 1 }}>
+            {submitting ? "Saving…" : "Submit"}
+          </button>
+          <span style={{ fontSize: "0.75rem", color: "#9ca3af", lineHeight: 1.4 }}>
+            Your wishlist items are saved for planning. The AI research pipeline will process them pre-trip.
+          </span>
+        </div>
       </div>
 
       {/* Pending queue (admin) */}
@@ -130,6 +162,37 @@ export default function WishlistPage() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div
+          onClick={toast.type === "error" ? dismissToast : undefined}
+          style={{
+            position: "fixed",
+            bottom: "1.5rem",
+            right: "1.5rem",
+            zIndex: 9999,
+            padding: "0.875rem 1.25rem",
+            borderRadius: "10px",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+            background: toast.type === "success" ? "#d1fae5" : "#fee2e2",
+            color: toast.type === "success" ? "#065f46" : "#991b1b",
+            fontSize: "0.875rem",
+            fontWeight: 600,
+            maxWidth: "320px",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            cursor: toast.type === "error" ? "pointer" : "default",
+          }}
+        >
+          <span>{toast.type === "success" ? "✓" : "✕"}</span>
+          <span>{toast.msg}</span>
+          {toast.type === "error" && (
+            <span style={{ marginLeft: "auto", fontSize: "0.75rem", opacity: 0.7 }}>tap to dismiss</span>
+          )}
         </div>
       )}
     </div>

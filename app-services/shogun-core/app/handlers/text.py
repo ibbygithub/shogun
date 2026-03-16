@@ -8,6 +8,7 @@ from app.models import TelegramEnvelope
 from app.commands.system import handle_command
 from app.services.llm import chat, build_system_prompt
 from app.services.rag import respond as rag_respond
+from app.services.weather import get_weather_for_city
 from app.valkey_client import get_context, save_context, get_translate_mode
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,22 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
 
     # Build conversation context
     history = get_context(telegram_user_id)
-    system_prompt = build_system_prompt(user, prefs)
+
+    # Pre-fetch weather asynchronously so build_system_prompt can inject it
+    # City is derived from the itinerary; fall back gracefully if unavailable
+    weather_str: str | None = None
+    try:
+        from datetime import datetime, timezone, timedelta
+        from app import db
+        _JST = timezone(timedelta(hours=9))
+        today_jst = datetime.now(_JST).strftime("%Y-%m-%d")
+        city = db.get_city_for_date(today_jst)
+        if city:
+            weather_str = await get_weather_for_city(city.lower())
+    except Exception as _exc:
+        logger.warning("Weather pre-fetch failed: %s", _exc)
+
+    system_prompt = build_system_prompt(user, prefs, weather_str=weather_str)
 
     # Translate mode: append translation instruction to system prompt
     if get_translate_mode(telegram_user_id):

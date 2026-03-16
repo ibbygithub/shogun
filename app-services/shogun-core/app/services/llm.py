@@ -15,13 +15,20 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 25.0  # Must complete before Telegram gateway times out (~30s)
 
 
-def build_system_prompt(user: dict | None, prefs: list[dict]) -> str:
+def build_system_prompt(user: dict | None, prefs: list[dict],
+                        weather_str: str | None = None) -> str:
     """
     Build a system prompt from user profile, preferences, and today's trip context.
     Loads today's itinerary and city POIs from DB automatically.
+    weather_str: optional pre-fetched weather string from the async weather service.
     """
     # Import here to avoid circular imports at module load time
     from app import db
+
+    # Current JST time — always injected so the LLM never has to guess
+    now_jst = datetime.now(_JST)
+    today_jst = now_jst.strftime("%Y-%m-%d")
+    time_jst  = now_jst.strftime("%H:%M")
 
     lines = [
         "You are Shogun, an expert Japan travel concierge for the Ibbotson family.",
@@ -31,6 +38,7 @@ def build_system_prompt(user: dict | None, prefs: list[dict]) -> str:
         "Respond in English unless explicitly asked to translate.",
         "Keep responses concise — Telegram is a mobile interface.",
         "",
+        f"Current date and time: {today_jst} {time_jst} JST",
     ]
 
     if user:
@@ -47,9 +55,13 @@ def build_system_prompt(user: dict | None, prefs: list[dict]) -> str:
         for cat, entries in by_cat.items():
             lines.append(f"  {cat}: {', '.join(entries)}")
 
+    # ── Weather context (injected if pre-fetched) ─────────────────────────
+    if weather_str:
+        lines.append(f"Today's weather: {weather_str}")
+
     # ── Trip context (itinerary + city POIs) ──────────────────────────────
     try:
-        today_jst = datetime.now(_JST).strftime("%Y-%m-%d")
+        # today_jst is already computed above — reuse it here
         itinerary = db.get_todays_itinerary(today_jst)
         city = db.get_city_for_date(today_jst)
 
