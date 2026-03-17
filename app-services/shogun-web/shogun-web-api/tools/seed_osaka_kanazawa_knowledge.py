@@ -464,7 +464,8 @@ SELECT 1 FROM knowledge_items WHERE topic = %s AND city = %s LIMIT 1;
 
 INSERT_SQL = """
 INSERT INTO knowledge_items (city, category, topic, content_summary, source_url, anchor)
-VALUES (%s, %s, %s, %s, %s, %s);
+VALUES (%s, %s, %s, %s, %s, %s)
+ON CONFLICT DO NOTHING;
 """
 
 COUNT_SQL = """
@@ -496,14 +497,11 @@ def main():
     for city, category, topic, content_summary, source_url, anchor in KNOWLEDGE_ITEMS:
         try:
             with conn.cursor() as cur:
-                # Check for existing record (deduplicate on topic + city)
-                cur.execute(CHECK_DUPLICATE_SQL, (topic, city))
-                if cur.fetchone():
-                    skipped += 1
-                    continue
-
                 cur.execute(INSERT_SQL, (city, category, topic, content_summary, source_url, anchor))
-                inserted += 1
+                if cur.rowcount == 1:
+                    inserted += 1
+                else:
+                    skipped += 1  # ON CONFLICT DO NOTHING — row already existed
         except Exception as exc:
             conn.rollback()
             print(f"  [ERROR] Failed to insert '{topic}' ({city}): {exc}", file=sys.stderr)
