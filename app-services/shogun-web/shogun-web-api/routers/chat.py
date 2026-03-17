@@ -14,6 +14,11 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 LLM_GATEWAY  = os.getenv("LLM_GATEWAY_URL", "http://platform-llm-gateway:8080")
 TAVILY_GW    = os.getenv("TAVILY_GATEWAY_URL", "http://platform-tavily:8084")
+# Gemini REST API — used directly for function-calling requests (not available via gateway)
+GOOGLE_API_KEY   = os.getenv("GOOGLE_API_KEY", "")
+GOOGLE_BASE_URL  = os.getenv("GOOGLE_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
+GEMINI_MODEL     = "gemini-2.0-flash"
+
 HISTORY_TTL  = 86400  # 24 hours
 
 CONV_LIST_TTL = 60 * 60 * 24 * 30   # 30 days
@@ -55,6 +60,653 @@ _SAKURA_KEYWORDS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Gemini function calling — tool definitions
+# ---------------------------------------------------------------------------
+# These are declared in Gemini's native function-declaration format.
+# Each tool maps 1:1 to a _exec_* function below.
+
+CALENDAR_TOOLS = [
+    {
+        "name": "get_itinerary_legs",
+        "description": (
+            "Get trip itinerary legs, optionally filtered by city or date. "
+            "Use this when the user asks about what's planned, what's on a specific day, "
+            "or the trip schedule."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "Filter by city: osaka, nara, kanazawa, tokyo. Omit for all cities.",
+                },
+                "date": {
+                    "type": "string",
+                    "description": "Filter by specific date in YYYY-MM-DD format. Omit for all dates.",
+                },
+            },
+        },
+    },
+    {
+        "name": "update_itinerary_leg",
+        "description": (
+            "Update a trip itinerary leg. Use when the user wants to add notes, change the title, "
+            "or update description for a specific day."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "leg_id": {
+                    "type": "integer",
+                    "description": "The ID of the leg to update",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Notes to add or update on the leg (stored in notes_en column)",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "New title for the leg (optional)",
+                },
+            },
+            "required": ["leg_id"],
+        },
+    },
+    {
+        "name": "get_checklist_items",
+        "description": (
+            "Get the packing checklist items, optionally filtered by category or packed status."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Filter by category (documents, clothing, electronics, toiletries, misc). Omit for all.",
+                },
+                "packed": {
+                    "type": "boolean",
+                    "description": "Filter by packed status. Omit for all items.",
+                },
+            },
+        },
+    },
+    {
+        "name": "toggle_checklist_item",
+        "description": "Mark a packing checklist item as packed or unpacked.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "integer",
+                    "description": "The ID of the checklist item",
+                },
+                "packed": {
+                    "type": "boolean",
+                    "description": "True to mark as packed, False to unpack",
+                },
+            },
+            "required": ["item_id", "packed"],
+        },
+    },
+    {
+        "name": "search_trip_knowledge",
+        "description": (
+            "Search the trip knowledge base for local recommendations, restaurants, shops, temples, "
+            "and travel tips. Use this when the user asks about places to visit, where to eat, "
+            "shopping, or local knowledge."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query",
+                },
+                "city": {
+                    "type": "string",
+                    "description": "Filter by city. Omit for all cities.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Filter by category: restaurant, vintage, skincare, temple, street_food, museum, etc.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_trip_pois",
+        "description": (
+            "Get points of interest (places to visit) for the trip, optionally filtered by city or category."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "Filter by city",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Filter by POI category",
+                },
+            },
+        },
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Tool execution functions — each returns a plain string for Gemini
+# ---------------------------------------------------------------------------
+
+def _exec_get_itinerary_legs(args: dict) -> str:
+    """Query trip_itinerary filtered by city and/or date."""
+    try:
+        city = args.get("city")
+        date_filter = args.get("date")
+
+        clauses: list[str] = []
+        params: list = []
+
+        if city:
+            clauses.append("LOWER(city) = %s")
+            params.append(city.lower())
+        if date_filter:
+            clauses.append("date_local = %s")
+            params.append(date_filter)
+
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT id, leg_type, city, date_local, title, notes_en, start_time, end_time
+                    FROM trip_itinerary
+                    {where}
+                    ORDER BY date_local, leg_sequence
+                    """,
+                    params,
+                )
+                rows = cur.fetchall()
+
+        if not rows:
+            return "No itinerary legs found matching those filters."
+
+        lines = []
+        for r in rows:
+            leg_id, leg_type, city_val, date_val, title, notes_en, start_time, end_time = r
+            time_str = ""
+            if start_time:
+                time_str = f" at {start_time}"
+                if end_time:
+                    time_str += f"–{end_time}"
+            notes_str = f" | Notes: {notes_en}" if notes_en else ""
+            lines.append(
+                f"[ID:{leg_id}] {date_val} ({leg_type}) — {title}{time_str}"
+                f" | City: {city_val}{notes_str}"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error reading itinerary: {e}"
+
+
+def _exec_update_itinerary_leg(args: dict) -> str:
+    """Partial update of a trip_itinerary leg — notes and/or title."""
+    try:
+        leg_id = args.get("leg_id")
+        if not leg_id:
+            return "Error: leg_id is required."
+
+        notes = args.get("notes")
+        title = args.get("title")
+
+        if not notes and not title:
+            return "Error: at least one of notes or title must be provided."
+
+        updates: list[tuple[str, object]] = []
+        if title:
+            updates.append(("title", title))
+        if notes:
+            updates.append(("notes_en", notes))
+
+        set_clause = ", ".join(f"{col} = %s" for col, _ in updates)
+        values = [v for _, v in updates] + [leg_id]
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE trip_itinerary
+                    SET {set_clause}
+                    WHERE id = %s
+                    RETURNING id, title, notes_en, city, date_local
+                    """,
+                    values,
+                )
+                row = cur.fetchone()
+                if not row:
+                    return f"Error: no itinerary leg found with ID {leg_id}."
+
+        changed = []
+        if title:
+            changed.append(f"title → \"{title}\"")
+        if notes:
+            changed.append(f"notes → \"{notes}\"")
+
+        return (
+            f"Updated leg ID {row[0]} ({row[3]}, {row[4]}): {row[1]}. "
+            f"Changes: {', '.join(changed)}."
+        )
+    except Exception as e:
+        return f"Error updating itinerary leg: {e}"
+
+
+def _exec_get_checklist_items(args: dict) -> str:
+    """Query checklist_items filtered by category and/or packed status."""
+    try:
+        category = args.get("category")
+        packed = args.get("packed")  # may be None (omitted), True, or False
+
+        clauses: list[str] = []
+        params: list = []
+
+        if category:
+            clauses.append("category = %s")
+            params.append(category.lower())
+        if packed is not None:
+            clauses.append("packed = %s")
+            params.append(bool(packed))
+
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT id, category, item_name, packed, notes
+                    FROM checklist_items
+                    {where}
+                    ORDER BY category, item_name
+                    """,
+                    params,
+                )
+                rows = cur.fetchall()
+
+        if not rows:
+            return "No checklist items found matching those filters."
+
+        lines = []
+        for r in rows:
+            item_id, cat, name, is_packed, notes = r
+            status = "✓ packed" if is_packed else "○ not packed"
+            notes_str = f" ({notes})" if notes else ""
+            lines.append(f"[ID:{item_id}] [{cat}] {name} — {status}{notes_str}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error reading checklist: {e}"
+
+
+def _exec_toggle_checklist_item(args: dict) -> str:
+    """Toggle packed status on a checklist_items row."""
+    try:
+        item_id = args.get("item_id")
+        packed = args.get("packed")
+
+        if item_id is None:
+            return "Error: item_id is required."
+        if packed is None:
+            return "Error: packed (true/false) is required."
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE checklist_items
+                    SET packed = %s
+                    WHERE id = %s
+                    RETURNING id, item_name, packed
+                    """,
+                    (bool(packed), item_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return f"Error: no checklist item found with ID {item_id}."
+
+        status = "packed" if row[2] else "unpacked"
+        return f"'{row[1]}' is now marked as {status}."
+    except Exception as e:
+        return f"Error toggling checklist item: {e}"
+
+
+def _exec_search_trip_knowledge(args: dict) -> str:
+    """Search knowledge_items using ILIKE on topic and content_summary."""
+    try:
+        query = args.get("query", "").strip()
+        city = args.get("city")
+        category = args.get("category")
+
+        if not query:
+            return "Error: query is required."
+
+        clauses: list[str] = []
+        params: list = []
+
+        # Full-text-style ILIKE across topic and content_summary
+        clauses.append("(topic ILIKE %s OR content_summary ILIKE %s)")
+        like_term = f"%{query}%"
+        params.extend([like_term, like_term])
+
+        if city:
+            clauses.append("(city = %s OR city IS NULL)")
+            params.append(city.lower())
+        if category:
+            clauses.append("category = %s")
+            params.append(category.lower())
+
+        where = "WHERE " + " AND ".join(clauses)
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT id, city, category, topic, content_summary
+                    FROM knowledge_items
+                    {where}
+                    ORDER BY city NULLS LAST, topic
+                    LIMIT 5
+                    """,
+                    params,
+                )
+                rows = cur.fetchall()
+
+        if not rows:
+            return f"No knowledge items found for query: {query}"
+
+        lines = []
+        for r in rows:
+            item_id, city_val, cat, topic, summary = r
+            city_label = city_val.title() if city_val else "All cities"
+            lines.append(f"[{city_label} / {cat}] {topic}: {summary}")
+        return "\n\n".join(lines)
+    except Exception as e:
+        return f"Error searching knowledge base: {e}"
+
+
+def _exec_get_trip_pois(args: dict) -> str:
+    """Query trip_pois filtered by city and/or category."""
+    try:
+        city = args.get("city")
+        category = args.get("category")
+
+        clauses: list[str] = []
+        params: list = []
+
+        if city:
+            clauses.append("LOWER(city) = %s")
+            params.append(city.lower())
+        if category:
+            clauses.append("category = %s")
+            params.append(category.lower())
+
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT id, city, name_en, name_ja, category, crowd_notes, best_time_notes
+                    FROM trip_pois
+                    {where}
+                    ORDER BY city, name_en
+                    LIMIT 20
+                    """,
+                    params,
+                )
+                rows = cur.fetchall()
+
+        if not rows:
+            return "No POIs found matching those filters."
+
+        lines = []
+        for r in rows:
+            poi_id, city_val, name_en, name_ja, cat, crowd, best_time = r
+            name_str = f"{name_en}"
+            if name_ja:
+                name_str += f" ({name_ja})"
+            crowd_str = f" | Crowd: {crowd}" if crowd else ""
+            time_str = f" | Best time: {best_time}" if best_time else ""
+            lines.append(f"[ID:{poi_id}] {city_val} — {name_str} [{cat}]{crowd_str}{time_str}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error reading POIs: {e}"
+
+
+# Dispatch table — maps tool name → executor function
+_TOOL_EXECUTORS = {
+    "get_itinerary_legs":    _exec_get_itinerary_legs,
+    "update_itinerary_leg":  _exec_update_itinerary_leg,
+    "get_checklist_items":   _exec_get_checklist_items,
+    "toggle_checklist_item": _exec_toggle_checklist_item,
+    "search_trip_knowledge": _exec_search_trip_knowledge,
+    "get_trip_pois":         _exec_get_trip_pois,
+}
+
+
+# ---------------------------------------------------------------------------
+# Gemini REST API helpers (direct — used for tool-calling; gateway doesn't support tools)
+# ---------------------------------------------------------------------------
+
+def _gemini_url(model: str = GEMINI_MODEL) -> str:
+    if not model.startswith("models/"):
+        model = f"models/{model}"
+    return f"{GOOGLE_BASE_URL}/v1beta/{model}:generateContent?key={GOOGLE_API_KEY}"
+
+
+def _history_to_gemini_contents(history: list[dict], system_prompt: str) -> tuple[list[dict], str | None]:
+    """
+    Convert Shogun chat history + system prompt to Gemini content format.
+    Gemini uses role "user" and "model" (not "assistant").
+    System prompt is returned separately for systemInstruction.
+    """
+    contents: list[dict] = []
+    for msg in history:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "system":
+            continue  # handled via systemInstruction
+        gemini_role = "model" if role == "assistant" else "user"
+        contents.append({"role": gemini_role, "parts": [{"text": content}]})
+    return contents, system_prompt
+
+
+def _call_gemini_with_tools(
+    contents: list[dict],
+    system_prompt: str,
+    tools: list[dict],
+    max_output_tokens: int = 1024,
+) -> dict:
+    """
+    Single Gemini REST call with function declarations.
+    Returns the raw Gemini response dict.
+    Raises httpx.HTTPError on failure.
+    """
+    payload: dict = {
+        "contents": contents,
+        "tools": [{"functionDeclarations": tools}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": max_output_tokens,
+        },
+    }
+    if system_prompt:
+        payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+    resp = httpx.post(_gemini_url(), json=payload, timeout=30.0)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _extract_gemini_text(raw: dict) -> str:
+    """Extract text from a Gemini generateContent response."""
+    candidates = raw.get("candidates", [])
+    if not candidates:
+        return ""
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    texts = [p.get("text", "") for p in parts if "text" in p]
+    return " ".join(texts).strip()
+
+
+def _extract_function_calls(raw: dict) -> list[dict]:
+    """
+    Extract any functionCall parts from a Gemini response.
+    Returns a list of dicts: [{"name": str, "args": dict}, ...]
+    """
+    candidates = raw.get("candidates", [])
+    if not candidates:
+        return []
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    calls = []
+    for p in parts:
+        if "functionCall" in p:
+            fc = p["functionCall"]
+            calls.append({
+                "name": fc.get("name", ""),
+                "args": fc.get("args", {}),
+            })
+    return calls
+
+
+# ---------------------------------------------------------------------------
+# Tool-aware chat invocation (multi-turn with tool execution loop)
+# ---------------------------------------------------------------------------
+
+def _run_chat_with_tools(
+    history: list[dict],
+    user_message: str,
+    system_prompt: str,
+) -> tuple[str, list[dict]]:
+    """
+    Invoke Gemini with function-calling support.
+    Executes a tool-calling loop: up to 3 rounds of tool calls before
+    forcing a final text response.
+
+    Returns:
+        (reply_text, tool_actions)
+        tool_actions: list of {"tool": str, "summary": str}
+    """
+    # Build Gemini contents from history (already includes the new user message)
+    contents, _ = _history_to_gemini_contents(history, system_prompt)
+
+    # If contents is empty (first message), Gemini needs at least a user turn
+    if not contents:
+        contents = [{"role": "user", "parts": [{"text": user_message}]}]
+
+    tool_actions: list[dict] = []
+    MAX_TOOL_ROUNDS = 3
+
+    for _round in range(MAX_TOOL_ROUNDS):
+        raw = _call_gemini_with_tools(contents, system_prompt, CALENDAR_TOOLS)
+        function_calls = _extract_function_calls(raw)
+
+        if not function_calls:
+            # Model returned a plain text response — we're done
+            return _extract_gemini_text(raw), tool_actions
+
+        # Execute each tool call and collect results
+        tool_result_parts: list[dict] = []
+        for fc in function_calls:
+            tool_name = fc["name"]
+            tool_args = fc["args"]
+            executor = _TOOL_EXECUTORS.get(tool_name)
+            if executor:
+                result_text = executor(tool_args)
+            else:
+                result_text = f"Error: unknown tool '{tool_name}'"
+
+            tool_actions.append({
+                "tool": tool_name,
+                "summary": _tool_action_summary(tool_name, tool_args, result_text),
+            })
+            tool_result_parts.append({
+                "functionResponse": {
+                    "name": tool_name,
+                    "response": {"result": result_text},
+                }
+            })
+
+        # Append model's function-call turn and the tool results to contents
+        # so Gemini can synthesize a final answer
+        model_turn_parts = [{"functionCall": {"name": fc["name"], "args": fc["args"]}}
+                            for fc in function_calls]
+        contents.append({"role": "model", "parts": model_turn_parts})
+        contents.append({"role": "user", "parts": tool_result_parts})
+
+    # Safety exit: if we hit MAX_TOOL_ROUNDS without a text response,
+    # do a final call with toolConfig set to TEXT_ONLY to force a response
+    raw = _call_gemini_with_tools(contents, system_prompt, tools=[])
+    return _extract_gemini_text(raw), tool_actions
+
+
+def _tool_action_summary(tool_name: str, args: dict, result: str) -> str:
+    """Generate a human-readable one-liner describing what a tool call did."""
+    if tool_name == "get_itinerary_legs":
+        city = args.get("city", "")
+        date_val = args.get("date", "")
+        parts = []
+        if city:
+            parts.append(city.title())
+        if date_val:
+            parts.append(date_val)
+        scope = " / ".join(parts) if parts else "full trip"
+        return f"Read itinerary ({scope})"
+
+    if tool_name == "update_itinerary_leg":
+        leg_id = args.get("leg_id", "?")
+        changes = []
+        if args.get("notes"):
+            changes.append("notes updated")
+        if args.get("title"):
+            changes.append("title updated")
+        return f"Updated leg ID {leg_id}: {', '.join(changes)}"
+
+    if tool_name == "get_checklist_items":
+        cat = args.get("category", "all categories")
+        packed_filter = args.get("packed")
+        status = ""
+        if packed_filter is True:
+            status = " (packed)"
+        elif packed_filter is False:
+            status = " (unpacked)"
+        return f"Read checklist: {cat}{status}"
+
+    if tool_name == "toggle_checklist_item":
+        item_id = args.get("item_id", "?")
+        packed = args.get("packed", False)
+        action = "packed" if packed else "unpacked"
+        return f"Marked checklist item {item_id} as {action}"
+
+    if tool_name == "search_trip_knowledge":
+        query = args.get("query", "?")
+        city = args.get("city", "")
+        scope = f" in {city.title()}" if city else ""
+        return f"Searched knowledge base: \"{query}\"{scope}"
+
+    if tool_name == "get_trip_pois":
+        city = args.get("city", "all cities")
+        cat = args.get("category", "all categories")
+        return f"Read POIs: {city} / {cat}"
+
+    return f"Called tool: {tool_name}"
+
+
+# ---------------------------------------------------------------------------
+# City / weather helpers (unchanged from original)
+# ---------------------------------------------------------------------------
+
 def _current_city() -> str:
     """Return the trip city for today's JST date, defaulting to 'osaka'."""
     today = datetime.now(_JST).strftime("%Y-%m-%d")
@@ -79,12 +731,10 @@ def _get_weather_for_city(city: str) -> str | None:
     try:
         cached = cache.get(cache_key)
         if cached:
-            # The weather router stores a full JSON blob; parse and format it
             try:
                 data = json.loads(cached)
                 current = data.get("current", {})
                 temp = current.get("temperature_2m")
-                # forecast_3day is stored as list of WeatherDay dicts
                 forecast = data.get("forecast_3day", [])
                 max_t = forecast[0].get("temperature_max") if forecast else None
                 min_t = forecast[0].get("temperature_min") if forecast else None
@@ -97,11 +747,10 @@ def _get_weather_for_city(city: str) -> str | None:
                         s += f", {precip}mm precipitation"
                     return s
             except Exception:
-                pass  # fall through to fresh fetch
+                pass
     except Exception:
         pass
 
-    # Fresh fetch from Open-Meteo
     lat, lon = _CITY_COORDS[city_lower]
     url = (
         "https://api.open-meteo.com/v1/forecast"
@@ -128,7 +777,6 @@ def _get_weather_for_city(city: str) -> str | None:
         if precip and precip > 0:
             weather_str += f", {precip}mm precipitation"
 
-        # Cache the raw weather string (not the full JSON blob) under a separate key
         try:
             cache.setex(f"shogun:web:weather:str:{city_lower}", 1800, weather_str)
         except Exception:
@@ -210,8 +858,6 @@ def build_system_prompt(city: str = "osaka") -> str:
     Build the chat system prompt dynamically at request time.
     Injects current JST date/time, live weather, today's itinerary, and
     the actual POIs for the current city from the database.
-    The POI section is formatted to be unmissable by the LLM so it uses
-    dashboard data rather than generic knowledge.
     """
     now_jst   = datetime.now(_JST)
     today_str = now_jst.strftime("%Y-%m-%d")
@@ -222,11 +868,9 @@ def build_system_prompt(city: str = "osaka") -> str:
     if weather_str:
         weather_line = f"\nToday's weather: {weather_str}"
 
-    # Fetch today's itinerary and city POIs from the database
     itinerary = _fetch_today_itinerary()
     pois = _fetch_city_pois(city)
 
-    # Build the dashboard data block — formatted to be hard to ignore
     dashboard_lines = ["", "=== YOUR DASHBOARD DATA — USE THIS, DO NOT SUBSTITUTE ==="]
 
     if itinerary:
@@ -254,6 +898,11 @@ def build_system_prompt(city: str = "osaka") -> str:
         )
 
     dashboard_lines.append("=======================================================")
+    dashboard_lines.append(
+        "You have access to tools that let you read and write trip data. "
+        "When a user asks about itinerary, packing, or places — use the appropriate tool "
+        "to fetch live data before answering. When they ask to update something, use the tool to write it."
+    )
     dashboard_block = "\n".join(dashboard_lines)
 
     return (
@@ -349,7 +998,6 @@ def _get_or_create_current_conv(user_id: int) -> str:
             conv_id = conv_id.decode()
         return conv_id
 
-    # Check for legacy history (old single-key scheme)
     legacy_key = f"shogun:web:{user_id}:chat"
     legacy_raw = cache.get(legacy_key)
 
@@ -363,7 +1011,6 @@ def _get_or_create_current_conv(user_id: int) -> str:
             legacy_msgs = []
         title = "Previous conversation"
         count = len(legacy_msgs)
-        # Migrate messages to new per-conversation key
         cache.setex(_conv_msg_key(user_id, new_id), CONV_MSG_TTL, json.dumps(legacy_msgs))
         cache.delete(legacy_key)
     else:
@@ -396,13 +1043,11 @@ def _save_history(user_id: int, history: list[dict]) -> None:
     cache = get_cache()
     cache.setex(_conv_msg_key(user_id, conv_id), CONV_MSG_TTL, json.dumps(history))
 
-    # Update conversation metadata: title (from first user message), count, last_at
     convs = _load_conv_list(user_id)
     for conv in convs:
         if conv["id"] == conv_id:
             conv["last_at"] = time.time()
             conv["message_count"] = len(history)
-            # Derive title from first user message if still a default placeholder
             if conv["title"] in ("New conversation", "Previous conversation"):
                 for msg in history:
                     if msg["role"] == "user":
@@ -419,11 +1064,7 @@ def _save_history(user_id: int, history: list[dict]) -> None:
 @router.post("")
 def chat(body: ChatMessage, request: Request, user: User = Depends(get_current_user)):
     history = _load_history(user.id)
-
-    # Determine current trip city for context
     city = _current_city()
-
-    # Build dynamic system prompt with live time and weather
     system_prompt = build_system_prompt(city)
 
     # Sakura / event / weather queries: augment with Tavily before LLM call
@@ -446,29 +1087,24 @@ def chat(body: ChatMessage, request: Request, user: User = Depends(get_current_u
                 f"Reference specific dates and status where visible."
             )
 
+    # Append user message to history for the tool-calling loop
     history.append({
         "role": "user",
         "content": user_message,
         "timestamp": time.time(),
     })
 
-    # Build messages for LLM gateway (strip timestamps for API call)
-    messages = [
-        {"role": h["role"], "content": h["content"]}
-        for h in history
-    ]
-
-    payload = {
-        "provider": "google",
-        "model": "gemini-2.0-flash",
-        "messages": [{"role": "system", "content": system_prompt}] + messages,
-        "max_output_tokens": 1024,
-    }
-
-    resp = httpx.post(f"{LLM_GATEWAY}/v1/chat", json=payload, timeout=30.0)
-    resp.raise_for_status()
-    data = resp.json()
-    response_text = data.get("output_text") or data.get("response", "")
+    # --- Tool-calling path (Gemini direct REST) ---
+    # Falls back to LLM gateway (no tools) if GOOGLE_API_KEY is not configured
+    tool_actions: list[dict] = []
+    if GOOGLE_API_KEY:
+        try:
+            response_text, tool_actions = _run_chat_with_tools(history, user_message, system_prompt)
+        except Exception:
+            # If Gemini direct call fails, fall through to gateway
+            response_text = _fallback_llm_call(system_prompt, history)
+    else:
+        response_text = _fallback_llm_call(system_prompt, history)
 
     # Store the original (un-augmented) user message in history for clean recall
     history[-1] = {
@@ -483,7 +1119,29 @@ def chat(body: ChatMessage, request: Request, user: User = Depends(get_current_u
     })
     _save_history(user.id, history)
 
-    return {"response": response_text, "session_id": str(user.id)}
+    return {
+        "response": response_text,
+        "session_id": str(user.id),
+        "tool_actions": tool_actions,
+    }
+
+
+def _fallback_llm_call(system_prompt: str, history: list[dict]) -> str:
+    """Call the LLM gateway (no function calling) as a fallback."""
+    messages = [
+        {"role": h["role"], "content": h["content"]}
+        for h in history
+    ]
+    payload = {
+        "provider": "google",
+        "model": "gemini-2.0-flash",
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
+        "max_output_tokens": 1024,
+    }
+    resp = httpx.post(f"{LLM_GATEWAY}/v1/chat", json=payload, timeout=30.0)
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("output_text") or data.get("response", "")
 
 
 @router.get("/history")
@@ -530,7 +1188,6 @@ def delete_conversation(conv_id: str, request: Request, user: User = Depends(get
     cache.delete(_conv_msg_key(user.id, conv_id))
     convs = [c for c in _load_conv_list(user.id) if c["id"] != conv_id]
     _save_conv_list(user.id, convs)
-    # If deleted conversation was current, switch to most recent remaining or clear
     current = cache.get(_current_conv_key(user.id))
     if isinstance(current, bytes):
         current = current.decode()
