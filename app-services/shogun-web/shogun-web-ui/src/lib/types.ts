@@ -98,10 +98,16 @@ export interface ServiceHealth {
   last_check: string;
 }
 
+export interface ToolAction {
+  tool: string;
+  summary: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: number | null;
+  tool_actions?: ToolAction[];
 }
 
 export interface Conversation {

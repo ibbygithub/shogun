@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import type { ChatMessage as ChatMsg, Conversation } from "@/lib/types";
+import type { ChatMessage as ChatMsg, Conversation, ToolAction } from "@/lib/types";
 import ChatMessage from "./ChatMessage";
 
 function formatDate(ts: number): string {
@@ -131,11 +131,12 @@ export default function ChatPanel() {
     setSending(true);
 
     try {
-      const res = await api.chat.send(text) as { response: string };
+      const res = await api.chat.send(text) as { response: string; tool_actions?: ToolAction[] };
       const assistantMsg: ChatMsg = {
         role: "assistant",
         content: res.response,
         timestamp: Date.now() / 1000,
+        tool_actions: res.tool_actions ?? [],
       };
       setMessages((prev) => [...prev, assistantMsg]);
 

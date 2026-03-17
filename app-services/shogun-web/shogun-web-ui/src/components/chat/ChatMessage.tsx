@@ -6,10 +6,15 @@ interface Props {
 
 export default function ChatMessage({ message }: Props) {
   const isUser = message.role === "user";
+  const toolActions = (!isUser && message.tool_actions && message.tool_actions.length > 0)
+    ? message.tool_actions
+    : null;
+
   return (
     <div style={{
       display: "flex",
-      justifyContent: isUser ? "flex-end" : "flex-start",
+      flexDirection: "column",
+      alignItems: isUser ? "flex-end" : "flex-start",
       marginBottom: "0.75rem",
     }}>
       <div style={{
@@ -25,6 +30,34 @@ export default function ChatMessage({ message }: Props) {
       }}>
         {message.content}
       </div>
+
+      {/* Tool action badges — shown only on AI messages that used tools */}
+      {toolActions && (
+        <div style={{
+          maxWidth: "75%",
+          marginTop: "0.25rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.2rem",
+        }}>
+          {toolActions.map((action, idx) => (
+            <div key={idx} style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.3rem",
+              padding: "2px 8px",
+              background: "#f0fdf4",
+              border: "1px solid #bbf7d0",
+              borderRadius: "6px",
+              fontSize: "0.72rem",
+              color: "#166534",
+            }}>
+              <span style={{ fontWeight: 600 }}>✓</span>
+              <span>{action.summary}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
