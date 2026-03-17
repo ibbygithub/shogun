@@ -29,6 +29,16 @@ export default function LegCard({ leg, compact }: Props) {
       <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {typeLabel} · {leg.title}
       </div>
+      {!compact && leg.description && (
+        <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", opacity: 0.75, lineHeight: 1.4 }}>
+          {leg.description}
+        </div>
+      )}
+      {!compact && leg.notes && (
+        <div style={{ marginTop: "0.375rem", fontSize: "0.8rem", background: "#fef9c3", borderRadius: 4, padding: "4px 8px", color: "#92400e" }}>
+          📝 {leg.notes}
+        </div>
+      )}
       {!compact && leg.address_en && (
         <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", opacity: 0.75 }}>
           {leg.address_en}
