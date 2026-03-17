@@ -91,23 +91,24 @@ CALENDAR_TOOLS = [
     {
         "name": "update_itinerary_leg",
         "description": (
-            "Update a trip itinerary leg. Use when the user wants to add notes, change the title, "
-            "or update description for a specific day."
+            "Update a trip itinerary leg. ALWAYS call get_itinerary_legs first to find the correct "
+            "leg_id before calling this tool. Use when the user wants to add notes or change the title "
+            "for a specific day. Notes are stored separately from the main description."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "leg_id": {
                     "type": "integer",
-                    "description": "The ID of the leg to update",
+                    "description": "The ID of the leg to update — obtain from get_itinerary_legs first",
                 },
                 "notes": {
                     "type": "string",
-                    "description": "Notes to add or update on the leg (stored in notes_en column)",
+                    "description": "Trip notes to add for this leg (stored in notes field, not the main description)",
                 },
                 "title": {
                     "type": "string",
-                    "description": "New title for the leg (optional)",
+                    "description": "New title for the leg (optional, only set if user explicitly requests a title change)",
                 },
             },
             "required": ["leg_id"],
@@ -271,7 +272,8 @@ def _exec_update_itinerary_leg(args: dict) -> str:
         if title:
             updates.append(("title", title))
         if notes:
-            updates.append(("notes_en", notes))
+            # notes_ja is the dedicated user notes field; notes_en is the immutable leg description
+            updates.append(("notes_ja", notes))
 
         set_clause = ", ".join(f"{col} = %s" for col, _ in updates)
         values = [v for _, v in updates] + [leg_id]
@@ -295,7 +297,7 @@ def _exec_update_itinerary_leg(args: dict) -> str:
         if title:
             changed.append(f"title → \"{title}\"")
         if notes:
-            changed.append(f"notes → \"{notes}\"")
+            changed.append(f"notes added: \"{notes}\"")
 
         return (
             f"Updated leg ID {row[0]} ({row[3]}, {row[4]}): {row[1]}. "
