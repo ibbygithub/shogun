@@ -1,5 +1,5 @@
 # Planning State — Shogun
-Last updated: 2026-03-16
+Last updated: 2026-03-17
 
 ## Project Summary
 
@@ -66,6 +66,12 @@ All 10 containers validated on Docker Desktop. Both repos pushed to GitHub (deve
 | Reddit gateway first-use | Validation report: search behavior documented, Nara + Osaka intel compiled |
 | Pre-existing wishlist bug | shogun_app had zero grants on wishlist_items — fixed with full CRUD grants |
 | GitHub push | develop branch pushed — 17 commits now on origin/develop |
+| AI calendar management (web chat) | Gemini function calling: 6 tools (get/update itinerary, checklist, knowledge, POIs). Tool action badge in chat. Notes write to notes_ja. PATCH endpoint. | Web UI | ✅ Completed 2026-03-17 | 2026-03-17 |
+| Calendar + planning page SSR fix | force-dynamic on calendar and city pages. Planning page: remove dead api.planning.itinerary() call. | Web UI | ✅ Completed 2026-03-17 | 2026-03-17 |
+| LegCard description + notes display | Non-compact view shows description (grey) and notes (amber badge). | Web UI | ✅ Completed 2026-03-17 | 2026-03-17 |
+| Dashboard sakura dedup + white banner | Removed BlossomWidget duplicate; SakuraStatus transparent background. | Web UI | ✅ Completed 2026-03-17 | 2026-03-17 |
+| Tokyo knowledge seeding | 100 records across shopping, skincare, temples, food, museum categories. | Data Lake | ✅ Completed 2026-03-17 | 2026-03-17 |
+| checklist_items migration | 15 packing items seeded. shogun_app grants on checklist_items + knowledge_items. | Database | ✅ Completed 2026-03-17 | 2026-03-17 |
 
 ## Active Work — Pre-Trip (Departure Mar 23, 7 days)
 
@@ -236,8 +242,14 @@ Full list of search terms per anchor/category per city. Planning session Tuesday
 | 9 | Apr 1 | Tokyo | Sugamo Airbnb (Toshima-ku) |
 | 10 | Apr 3 | Tokyo | Ghibli Museum — Mitaka (TIMED ENTRY NOON) |
 | 11 | Apr 9 | Tokyo→SFO | JL2 HND → SFO |
+| 14 | Apr 2 | Tokyo | Tokyo National Museum + Ueno Park + Ameyoko |
+| 15 | Apr 4 | Tokyo | Sugamo Neighbourhood - Koganji Temple + Jizo-dori |
+| 16 | Apr 5 | Tokyo | Shimokitazawa Vintage Shopping |
+| 17 | Apr 6 | Tokyo | Harajuku + Omotesando + Shibuya Shopping Day |
 
 POIs seeded: 30 total — osaka(6), tokyo(10), nara(4), kanazawa(4), kyoto(5), sakai(1)
+Knowledge items seeded: 100 Tokyo records (shopping, skincare, temples, food, museum)
+Checklist items: 15 packing items seeded
 
 ## Technology Registry
 

@@ -216,23 +216,17 @@ export default function PlanningPage() {
   const fetchItinerary = useCallback(async () => {
     setLoadingItinerary(true);
     try {
-      const data = await api.planning.itinerary();
-      setItinerary(data);
-    } catch {
-      // Fall back to itinerary legs grouped by date_start
-      try {
-        const legs = await (api.itinerary.list() as Promise<ItineraryLeg[]>);
-        const grouped: Record<string, unknown[]> = {};
-        for (const leg of legs) {
-          if (leg.date_start) {
-            if (!grouped[leg.date_start]) grouped[leg.date_start] = [];
-            grouped[leg.date_start].push(leg);
-          }
+      const legs = await (api.itinerary.list() as Promise<ItineraryLeg[]>);
+      const grouped: Record<string, unknown[]> = {};
+      for (const leg of legs) {
+        if (leg.date_start) {
+          if (!grouped[leg.date_start]) grouped[leg.date_start] = [];
+          grouped[leg.date_start].push(leg);
         }
-        setItinerary(grouped);
-      } catch {
-        setItinerary({});
       }
+      setItinerary(grouped);
+    } catch {
+      setItinerary({});
     } finally {
       setLoadingItinerary(false);
     }
