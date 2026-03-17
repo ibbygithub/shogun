@@ -2,6 +2,9 @@ import { api } from "@/lib/api";
 import type { ItineraryLeg } from "@/lib/types";
 import CalendarGrid from "@/components/calendar/CalendarGrid";
 
+// Force server-side rendering on every request so leg data is always current
+export const dynamic = "force-dynamic";
+
 async function getLegs(): Promise<ItineraryLeg[]> {
   try {
     return await api.calendar.list() as ItineraryLeg[];

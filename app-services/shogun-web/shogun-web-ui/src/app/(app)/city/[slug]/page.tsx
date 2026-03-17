@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { CITIES, type CitySlug } from "@/lib/cities";
 import { api } from "@/lib/api";
+
+export const dynamic = "force-dynamic";
 import type { ItineraryLeg } from "@/lib/types";
 import CityTheme from "@/components/city/CityTheme";
 import CityHero from "@/components/city/CityHero";
