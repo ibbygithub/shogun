@@ -28,10 +28,10 @@ export default function SakuraStatus({ data, loading }: Props) {
   if (loading || !data) {
     return (
       <div style={{
-        background: "white",
+        background: "transparent",
         borderRadius: "12px",
         padding: "1rem",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+        border: "1px solid #f3f4f6",
         minHeight: "100px",
         display: "flex",
         alignItems: "center",
@@ -49,10 +49,10 @@ export default function SakuraStatus({ data, loading }: Props) {
   return (
     <>
       <div style={{
-        background: "white",
+        background: "transparent",
         borderRadius: "12px",
         padding: "1rem",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+        border: "1px solid #fce7f3",
       }}>
         <div style={{ fontWeight: 700, marginBottom: "0.5rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
           🌸 Sakura Forecast
