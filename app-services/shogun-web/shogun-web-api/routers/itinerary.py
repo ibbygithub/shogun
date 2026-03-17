@@ -1,4 +1,6 @@
+from typing import Optional
 from fastapi import APIRouter, Request, Depends, HTTPException
+from pydantic import BaseModel
 from auth import get_current_user, require_edit, User
 from db import get_conn
 from models import ItineraryLeg, ItineraryLegCreate
@@ -46,9 +48,12 @@ def add_leg(body: ItineraryLegCreate, request: Request, user: User = Depends(get
             cur.execute(
                 """
                 INSERT INTO trip_itinerary
-                  (leg_type, city, date_local, title, notes_en,
+                  (leg_sequence, leg_type, city, date_local, title, notes_en,
                    address_en, address_ja, confirmation_number, notes_ja)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (
+                  (SELECT COALESCE(MAX(leg_sequence), 0) + 1 FROM trip_itinerary),
+                  %s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
                 RETURNING id, leg_type, city, date_local, title,
                           notes_en, address_en, address_ja, confirmation_number, notes_ja
                 """,
@@ -80,6 +85,49 @@ def update_leg(leg_id: int, body: ItineraryLegCreate, request: Request, user: Us
                     body.title, body.description, body.address_en, body.address_ja,
                     body.confirmation_number, body.notes, leg_id,
                 ),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Leg not found")
+            return _row_to_leg(row)
+
+
+class LegPatch(BaseModel):
+    """Partial update model — only provided fields are written to the DB."""
+    title: Optional[str] = None
+    notes_en: Optional[str] = None   # maps to notes_en (description / trip notes)
+    notes_ja: Optional[str] = None
+
+
+@router.patch("/{leg_id}", response_model=ItineraryLeg)
+def patch_leg(leg_id: int, body: LegPatch, request: Request, user: User = Depends(get_current_user)):
+    """Partial update of a trip itinerary leg. Only provided fields are changed."""
+    # Build a dynamic SET clause from whichever fields were supplied
+    updates: list[tuple[str, object]] = []
+    if body.title is not None:
+        updates.append(("title", body.title))
+    if body.notes_en is not None:
+        updates.append(("notes_en", body.notes_en))
+    if body.notes_ja is not None:
+        updates.append(("notes_ja", body.notes_ja))
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields provided to update")
+
+    set_clause = ", ".join(f"{col} = %s" for col, _ in updates)
+    values = [v for _, v in updates] + [leg_id]
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                UPDATE trip_itinerary
+                SET {set_clause}
+                WHERE id = %s
+                RETURNING id, leg_type, city, date_local, title,
+                          notes_en, address_en, address_ja, confirmation_number, notes_ja
+                """,
+                values,
             )
             row = cur.fetchone()
             if not row:
