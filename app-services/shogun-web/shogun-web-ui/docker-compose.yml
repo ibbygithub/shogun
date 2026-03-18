@@ -5,9 +5,9 @@ services:
     build:
       context: .
       args:
-        # Laptop recovery: browser calls the API directly on localhost.
-        # NEXT_PUBLIC_ vars are inlined at build time — must be a browser-reachable URL.
-        - NEXT_PUBLIC_API_URL=http://shogun-web-api:8090
+        # Browser-reachable URL baked at build time — must be the public Cloudflare hostname.
+        # Internal Docker names (shogun-web-api) are NOT resolvable from the user's browser.
+        - NEXT_PUBLIC_API_URL=https://api.shogun.ibbytech.com
     container_name: shogun-web-ui
     restart: unless-stopped
     environment:
