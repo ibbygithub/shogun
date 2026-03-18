@@ -3,6 +3,16 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import type { Poi, ItineraryLeg } from "@/lib/types";
+import dynamic from "next/dynamic";
+
+const TripMap = dynamic(() => import("@/components/map/TripMap"), {
+  ssr: false,
+  loading: () => (
+    <div style={{ height: "450px", background: "#f1f5f9", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: "0.875rem" }}>
+      Loading map…
+    </div>
+  ),
+});
 
 // Trip schedule: date key → city name
 function cityForDate(key: string): string {
@@ -197,6 +207,7 @@ function ScheduleModal({ poi, onClose, onScheduled }: ScheduleModalProps) {
 
 export default function PlanningPage() {
   const days = tripDays();
+  const [mapOpen, setMapOpen] = useState(false);
 
   const [pois, setPois] = useState<Poi[]>([]);
   // Itinerary keyed by date string → array of legs/items
@@ -257,6 +268,28 @@ export default function PlanningPage() {
       <p style={{ color: "#6b7280", fontSize: "0.875rem", marginBottom: "1.5rem" }}>
         Browse POIs and schedule them onto your trip timeline · Mar 23 – Apr 9, 2026
       </p>
+
+      {/* Collapsible trip map */}
+      <div style={{ marginBottom: "1.5rem", background: "white", borderRadius: "14px", boxShadow: "0 1px 4px rgba(0,0,0,0.08)", overflow: "hidden" }}>
+        <button
+          onClick={() => setMapOpen((v) => !v)}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "0.875rem 1rem", background: "none", border: "none", cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>🗺️ Trip Map</span>
+          <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+            {mapOpen ? "▲ Collapse" : "▼ Expand"}
+          </span>
+        </button>
+        {mapOpen && (
+          <div style={{ padding: "0 1rem 1rem" }}>
+            <TripMap height="450px" />
+          </div>
+        )}
+      </div>
 
       <div style={{
         display: "grid",
