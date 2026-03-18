@@ -36,18 +36,23 @@ def _current_city_from_db() -> tuple[str | None, int | None]:
 
 
 def _shogun_core_health() -> str:
+    # Post-Docker-Desktop migration: shogun-core runs as a container on
+    # platform_net. Use the container name rather than the old brainnode-01 FQDN.
     try:
-        resp = httpx.get("http://brainnode-01.ibbytech.com:8082/health", timeout=3.0)
+        resp = httpx.get("http://shogun-core:8082/health", timeout=3.0)
         return "ok" if resp.status_code == 200 else "degraded"
     except Exception:
         return "unreachable"
 
 
 def _pending_wishlist_count() -> int:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM wishlist_items WHERE status = 'pending'")
-            return cur.fetchone()[0]
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM wishlist_items WHERE status = 'pending'")
+                return cur.fetchone()[0]
+    except Exception:
+        return 0
 
 
 @router.get("/status", response_model=DashboardStatus)

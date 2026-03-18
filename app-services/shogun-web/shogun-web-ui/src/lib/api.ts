@@ -68,7 +68,33 @@ export const api = {
   chat: {
     send: (message: string) =>
       apiFetch("/chat", { method: "POST", body: JSON.stringify({ message }) }),
-    history: () => apiFetch("/chat/history"),
+    history: () => apiFetch<import("./types").ChatMessage[]>("/chat/history"),
+    conversations: () => apiFetch<import("./types").ConversationList>("/chat/conversations"),
+    newConversation: () => apiFetch<import("./types").Conversation>("/chat/conversations", { method: "POST" }),
+    deleteConversation: (id: string) => apiFetch<{ok:boolean}>(`/chat/conversations/${id}`, { method: "DELETE" }),
+    activateConversation: (id: string) => apiFetch<{id:string, messages:import("./types").ChatMessage[]}>(`/chat/conversations/${id}/activate`, { method: "POST" }),
+    clearHistory: () => apiFetch<{ok:boolean}>("/chat/history", { method: "DELETE" }),
+  },
+  ambient: {
+    summary: () => apiFetch("/api/ambient/summary"),
+    weather: (city: string) => apiFetch(`/api/ambient/weather/${city}`),
+    sakura: (city: string) => apiFetch(`/api/ambient/sakura/${city}`),
+    transit: (city: string) => apiFetch(`/api/ambient/transit/${city}`),
+    events: (city: string) => apiFetch(`/api/ambient/events/${city}`),
+    aqi: (city: string) => apiFetch(`/api/ambient/aqi/${city}`),
+    exchangeRate: () => apiFetch("/api/ambient/exchange-rate"),
+    calendar: () => apiFetch("/api/ambient/calendar"),
+  },
+  planning: {
+    itinerary: () => apiFetch<Record<string, unknown[]>>("/planning/itinerary"),
+    schedule: (body: { date: string; poi_name: string; city: string; notes: string }) =>
+      apiFetch("/planning/schedule", { method: "POST", body: JSON.stringify(body) }),
+  },
+  budget: {
+    list: () => apiFetch<{ items: import("./types").BudgetItem[]; total_jpy: number; by_category: Record<string, number> }>("/api/budget"),
+    add: (body: { trip_date?: string; category: string; description: string; amount_jpy: number }) =>
+      apiFetch<import("./types").BudgetItem>("/api/budget", { method: "POST", body: JSON.stringify(body) }),
+    remove: (id: number) => apiFetch<{ ok: boolean }>(`/api/budget/${id}`, { method: "DELETE" }),
   },
   admin: {
     health: () => apiFetch("/admin/health"),

@@ -15,22 +15,50 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 25.0  # Must complete before Telegram gateway times out (~30s)
 
 
-def build_system_prompt(user: dict | None, prefs: list[dict]) -> str:
+def build_system_prompt(user: dict | None, prefs: list[dict],
+                        weather_str: str | None = None) -> str:
     """
     Build a system prompt from user profile, preferences, and today's trip context.
     Loads today's itinerary and city POIs from DB automatically.
+    weather_str: optional pre-fetched weather string from the async weather service.
     """
     # Import here to avoid circular imports at module load time
     from app import db
 
+    # Current JST time — always injected so the LLM never has to guess
+    now_jst = datetime.now(_JST)
+    today_jst = now_jst.strftime("%Y-%m-%d")
+    time_jst  = now_jst.strftime("%H:%M")
+
     lines = [
         "You are Shogun, an expert Japan travel concierge for the Ibbotson family.",
+        "Three travelers: Todd (dad, tech/food/culture), Brenda (mom, shopping/skincare/temples),",
+        "Madeline (daughter, anime/vintage/photography).",
         "You have 10 years of living experience in Japan. You know crowd patterns,",
         "opening hours, local customs, and the best spots in each city on the itinerary.",
         "You are direct, practical, and give specific recommendations — not generic tourism advice.",
         "Respond in English unless explicitly asked to translate.",
         "Keep responses concise — Telegram is a mobile interface.",
         "",
+        f"Current date and time: {today_jst} {time_jst} JST",
+        "",
+        "TRIP SCHEDULE:",
+        "  Mar 23: Travel day — SFO → LAX → KIX (arrive Mar 24 evening)",
+        "  Mar 24–29: Osaka — Tenjinbashi Queen Airbnb, Kita-ku (大阪市北区浪花町10-12)",
+        "             Station: Tenjinbashisuji-Rokuchome (天神橋筋六丁目) — Sakaisuji/Tanimachi lines",
+        "  Mar 25: Nara day trip (deer park, Todai-ji, Kasuga Shrine)",
+        "  Mar 26: Universal Studios Japan",
+        "  Mar 27–29: Osaka exploring (Dotonbori, Shinsekai, Tenjinbashi shotengai, Den Den Town)",
+        "  Mar 30–31: Hotel Sanraku, Owaricho, Kanazawa (石川県金沢市尾張町1-1-1)",
+        "             Station: Kanazawa (金沢駅) — 5 min walk to Omicho Market",
+        "  Apr 1–8: Sugamo Airbnb, Toshima-ku, Tokyo (東京都豊島区巣鴨4-37-6)",
+        "           Station: Sugamo (巣鴨) — Yamanote + Mita lines, 1 stop to Ikebukuro",
+        "  Apr 3: Ghibli Museum NOON timed entry — tickets confirmed",
+        "  Apr 9: Departure HND → SFO 4:25pm",
+        "",
+        "When the user asks about 'our place', 'the Airbnb', 'where we're staying', or",
+        "'when we get in' — use the accommodation above for the relevant trip dates.",
+        "NEVER ask for an address you already have.",
     ]
 
     if user:
@@ -47,9 +75,13 @@ def build_system_prompt(user: dict | None, prefs: list[dict]) -> str:
         for cat, entries in by_cat.items():
             lines.append(f"  {cat}: {', '.join(entries)}")
 
+    # ── Weather context (injected if pre-fetched) ─────────────────────────
+    if weather_str:
+        lines.append(f"Today's weather: {weather_str}")
+
     # ── Trip context (itinerary + city POIs) ──────────────────────────────
     try:
-        today_jst = datetime.now(_JST).strftime("%Y-%m-%d")
+        # today_jst is already computed above — reuse it here
         itinerary = db.get_todays_itinerary(today_jst)
         city = db.get_city_for_date(today_jst)
 

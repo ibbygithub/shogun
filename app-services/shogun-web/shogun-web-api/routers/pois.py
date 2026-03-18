@@ -37,6 +37,8 @@ def _row_to_poi(row) -> Poi:
         best_time=row[9],           # best_time_notes
         map_url=map_url,
         source=row[10],
+        lat=lat,
+        lng=lng,
     )
 
 

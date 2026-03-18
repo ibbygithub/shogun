@@ -25,6 +25,9 @@ export interface Poi {
   best_time: string | null;
   map_url: string | null;
   source: string | null;
+  // Added by API enrichment (Agent A) — may be null until enriched
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface WishlistItem {
@@ -95,8 +98,55 @@ export interface ServiceHealth {
   last_check: string;
 }
 
+export interface ToolAction {
+  tool: string;
+  summary: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: number | null;
+  tool_actions?: ToolAction[];
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: number;
+  last_at: number;
+  message_count: number;
+}
+
+export interface ConversationList {
+  conversations: Conversation[];
+  current_id: string | null;
+}
+
+export interface UpcomingLeg {
+  leg: number;
+  title: string;
+  city: string | null;
+  date: string;
+  notes: string | null;
+}
+
+export interface CalendarData {
+  date: string;
+  event: string | null;
+  note: string | null;
+  is_holiday: boolean;
+  error?: string;
+  // Pre-trip fields returned when no active itinerary leg today
+  days_until_trip?: number;
+  upcoming_legs?: UpcomingLeg[];
+}
+
+export interface BudgetItem {
+  id: number;
+  trip_date: string | null;
+  category: string;
+  description: string;
+  amount_jpy: number;
+  created_utc: string;
 }

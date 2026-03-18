@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Sidebar from "@/components/layout/Sidebar";
-import MobileTabBar from "@/components/layout/MobileTabBar";
 
 export const metadata: Metadata = {
   title: "Shogun — Japan Trip",
@@ -15,13 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
-        <div className="app-shell">
-          <Sidebar />
-          <main className="main-content">{children}</main>
-        </div>
-        <MobileTabBar />
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

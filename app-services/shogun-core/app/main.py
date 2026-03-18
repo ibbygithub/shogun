@@ -7,6 +7,8 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -18,6 +20,7 @@ from app.handlers import location as location_handler
 from app.handlers import voice as voice_handler
 from app.handlers import photo as photo_handler
 from app.handlers import media as media_handler
+from app.services.brief import send_morning_brief
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -37,7 +40,22 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("DB connection FAILED at startup: %s", exc)
         # Don't crash — allow the app to start so /health still responds
+
+    # Start the morning brief scheduler — fires at 22:00 UTC = 7:00 AM JST
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        send_morning_brief,
+        CronTrigger(hour=22, minute=0, timezone="UTC"),
+        id="morning_brief",
+        replace_existing=True,
+    )
+    scheduler.start()
+    logger.info("Morning brief scheduler started (fires at 22:00 UTC = 7:00 AM JST)")
+
     yield
+
+    scheduler.shutdown(wait=False)
+    logger.info("Scheduler stopped")
     logger.info("shogun-core shutting down")
 
 
@@ -48,6 +66,14 @@ app = FastAPI(title="shogun-core", version="0.4.0", lifespan=lifespan)
 async def health():
     """Liveness check used by validate_shogun.py and monitoring."""
     return {"ok": True, "service": "shogun-core", "version": "0.4.0"}
+
+
+@app.get("/debug/morning-brief")
+async def trigger_morning_brief():
+    """Manually trigger the morning brief — for testing only."""
+    from app.services.brief import send_morning_brief
+    await send_morning_brief()
+    return {"ok": True, "message": "Brief sent"}
 
 
 @app.post("/telegram/events")

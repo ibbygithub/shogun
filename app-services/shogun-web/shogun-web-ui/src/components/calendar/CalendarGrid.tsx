@@ -20,6 +20,29 @@ function dateKey(d: Date): string {
   return d.toISOString().split("T")[0];
 }
 
+// Derive city based on accommodation schedule
+function cityForDate(key: string): string {
+  if (key === "2026-03-23") return "travel";
+  if (key >= "2026-03-24" && key <= "2026-03-29") return "osaka";
+  if (key >= "2026-03-30" && key <= "2026-03-31") return "kanazawa";
+  if (key >= "2026-04-01" && key <= "2026-04-09") return "tokyo";
+  return "travel";
+}
+
+const CITY_BG: Record<string, string> = {
+  osaka: "#FFF3E0",
+  kanazawa: "#E8F5E9",
+  tokyo: "#E3F2FD",
+  travel: "#F3F4F6",
+};
+
+const CITY_LABEL: Record<string, string> = {
+  osaka: "🏯 Osaka",
+  kanazawa: "🌸 Kanazawa",
+  tokyo: "🗼 Tokyo",
+  travel: "✈️ Travel",
+};
+
 interface Props {
   legs: ItineraryLeg[];
 }
@@ -50,12 +73,13 @@ export default function CalendarGrid({ legs }: Props) {
           const key = dateKey(day);
           const dayLegs = legsByDate[key] ?? [];
           const isToday = key === todayKey;
+          const city = cityForDate(key);
 
           return (
             <div key={key}
               onClick={() => setSelectedDate(key)}
               style={{
-                background: "white",
+                background: CITY_BG[city] ?? "white",
                 borderRadius: "10px",
                 padding: "0.625rem",
                 cursor: "pointer",
@@ -82,7 +106,9 @@ export default function CalendarGrid({ legs }: Props) {
                 </div>
               )}
               {dayLegs.length === 0 && (
-                <div style={{ fontSize: "0.75rem", color: "#d1d5db" }}>Free day</div>
+                <div style={{ fontSize: "0.7rem", color: "#6b7280", fontStyle: "italic" }}>
+                  {CITY_LABEL[cityForDate(key)] ?? "Free day"}
+                </div>
               )}
             </div>
           );

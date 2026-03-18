@@ -6,6 +6,9 @@
 **/secrets/**
 !**/.env.example
 
+# credential notes (local only)
+**/google oauth for cloudflare.txt
+
 # Traefik TLS certs (local-only)
 infra/platform/compose/certs/*
 !infra/platform/compose/certs/.keep
@@ -16,3 +19,9 @@ infra/platform/compose/certs/*
 .claude/worktrees/
 .claude/settings.local.json
 .claude/__pycache__/
+
+# Playwright MCP session logs
+.playwright-mcp/
+
+# Validation screenshots (local only)
+outputs/validation/screenshots/

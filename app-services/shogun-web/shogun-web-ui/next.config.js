@@ -10,6 +10,20 @@ const nextConfig = {
       },
     ];
   },
+  // Allow Windy embed iframe (used by WindyRadar component)
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "frame-src 'self' https://embed.windy.com https://www.youtube.com https://youtube.com https://maps.google.com https://www.google.com *;",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;

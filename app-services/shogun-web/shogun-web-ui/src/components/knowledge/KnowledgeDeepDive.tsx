@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Poi } from "@/lib/types";
 import ChatPanel from "@/components/chat/ChatPanel";
+import MediaViewer from "@/components/MediaViewer";
 
 interface KnowledgeData {
   poi: Poi;
@@ -18,6 +19,7 @@ interface Props {
 
 export default function KnowledgeDeepDive({ data }: Props) {
   const [showChat, setShowChat] = useState(false);
+  const [mediaViewer, setMediaViewer] = useState<{ url: string; title: string } | null>(null);
   const { poi } = data;
 
   return (
@@ -48,37 +50,63 @@ export default function KnowledgeDeepDive({ data }: Props) {
         {poi.best_time && <div style={{ fontSize: "0.875rem", marginBottom: "0.25rem" }}>⏰ <strong>Best time:</strong> {poi.best_time}</div>}
         {poi.crowd_notes && <div style={{ fontSize: "0.875rem", marginBottom: "0.25rem" }}>👥 <strong>Crowds:</strong> {poi.crowd_notes}</div>}
         {data.booking_url && (
-          <a href={data.booking_url} target="_blank" rel="noopener noreferrer"
-            style={{ display: "inline-block", marginTop: "0.5rem", color: "var(--city-accent)", fontSize: "0.875rem", fontWeight: 600 }}>
+          <button
+            onClick={() => setMediaViewer({ url: data.booking_url!, title: `Map — ${poi.name_en}` })}
+            style={{
+              display: "inline-block",
+              marginTop: "0.5rem",
+              color: "var(--city-accent)",
+              fontSize: "0.875rem",
+              fontWeight: 600,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
             View on map →
-          </a>
+          </button>
         )}
       </div>
 
       {/* Learn more */}
       <div style={{ background: "white", borderRadius: "10px", padding: "1rem", marginBottom: "1rem", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
         <h3 style={{ fontWeight: 700, marginBottom: "0.75rem" }}>Learn More</h3>
+        {/* YouTube opens directly in a new tab — YouTube blocks embedding via X-Frame-Options */}
         <a
           href={`https://www.youtube.com/results?search_query=${encodeURIComponent(data.youtube_query)}`}
-          target="_blank" rel="noopener noreferrer"
+          target="_blank"
+          rel="noopener noreferrer"
           style={{
             display: "inline-flex", alignItems: "center", gap: "0.5rem",
             background: "#ff0000", color: "white", padding: "0.5rem 1rem",
-            borderRadius: "8px", fontWeight: 600, fontSize: "0.85rem", textDecoration: "none",
+            borderRadius: "8px", fontWeight: 600, fontSize: "0.85rem",
+            textDecoration: "none",
             marginBottom: "0.75rem",
           }}
         >
-          ▶ Watch on YouTube
+          ▶ Watch on YouTube ↗
         </a>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
           {data.suggested_searches.map((q, i) => (
-            <a key={i}
-              href={`https://www.google.com/search?q=${encodeURIComponent(q)}`}
-              target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: "0.85rem", color: "#1d4ed8" }}
+            <button
+              key={i}
+              onClick={() => setMediaViewer({
+                url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
+                title: q,
+              })}
+              style={{
+                fontSize: "0.85rem",
+                color: "#1d4ed8",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                textAlign: "left",
+                padding: "0",
+              }}
             >
               🔍 {q}
-            </a>
+            </button>
           ))}
         </div>
       </div>
@@ -103,6 +131,15 @@ export default function KnowledgeDeepDive({ data }: Props) {
           </div>
         )}
       </div>
+
+      {/* Media viewer modal */}
+      {mediaViewer && (
+        <MediaViewer
+          url={mediaViewer.url}
+          title={mediaViewer.title}
+          onClose={() => setMediaViewer(null)}
+        />
+      )}
     </div>
   );
 }
