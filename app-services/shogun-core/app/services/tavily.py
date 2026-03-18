@@ -31,7 +31,7 @@ async def search(
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(
-                f"{settings.tavily_gateway_url}/search",
+                f"{settings.tavily_gateway_url}/v1/search",
                 json=payload,
             )
             resp.raise_for_status()
