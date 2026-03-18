@@ -980,6 +980,7 @@ def _run_chat_with_tools(
 
     tool_actions: list[dict] = []
     MAX_TOOL_ROUNDS = 5
+    seen_calls: set[str] = set()  # dedup: prevent identical tool+args from running twice
 
     for _round in range(MAX_TOOL_ROUNDS):
         raw = _call_gemini_with_tools(contents, system_prompt, CALENDAR_TOOLS)
@@ -988,6 +989,18 @@ def _run_chat_with_tools(
         if not function_calls:
             # Model returned a plain text response — we're done
             return _extract_gemini_text(raw), tool_actions
+
+        # Deduplicate: skip any call with identical tool+args to a previous round
+        deduped: list[dict] = []
+        for fc in function_calls:
+            call_key = f"{fc['name']}:{json.dumps(fc['args'], sort_keys=True)}"
+            if call_key not in seen_calls:
+                seen_calls.add(call_key)
+                deduped.append(fc)
+        if not deduped:
+            # Every call was a duplicate — force a final text response
+            break
+        function_calls = deduped
 
         # Execute each tool call and collect results
         tool_result_parts: list[dict] = []
@@ -1306,6 +1319,9 @@ RULES — ALWAYS FOLLOW:
    c) If knowledge base returns nothing → call web_search with a specific query
    d) Use web_search results to answer — they are auto-saved for future queries
    e) NEVER say "I don't have that information" or "check online" — ALWAYS search first
+   f) If BOTH searches return empty: draw on your 10 years of Japan expertise to give
+      your best answer. Name specific places, neighborhoods, and practical details.
+      Never say "I'm having trouble" or "I cannot find" — always give a useful answer.
 
 2. LOCATION CONTEXT — Maintain location awareness across messages.
    If the user asks "where can I find X near the National Museum" and then asks "how about Y?",
