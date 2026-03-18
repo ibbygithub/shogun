@@ -3,7 +3,8 @@
 import dynamic from "next/dynamic";
 import type { Poi } from "@/lib/types";
 
-// Leaflet requires window — must be loaded client-side only
+// @vis.gl/react-google-maps references browser globals — must be loaded client-side only.
+// OSM/Leaflet fallback preserved at PoisMapInner.osm.tsx
 const PoisMapInner = dynamic(() => import("./PoisMapInner"), {
   ssr: false,
   loading: () => (
