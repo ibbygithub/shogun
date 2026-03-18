@@ -707,7 +707,7 @@ def _exec_web_search(args: dict) -> str:
             "max_results": 5,
             "search_depth": "basic",
         }
-        resp = httpx.post(f"{TAVILY_GW}/search", json=payload, timeout=15.0)
+        resp = httpx.post(f"{TAVILY_GW}/v1/search", json=payload, timeout=15.0)
         resp.raise_for_status()
         data = resp.json()
         results = data.get("results") or []
@@ -1570,7 +1570,7 @@ def _tavily_search(query: str, city: str, max_results: int = 3) -> list[str]:
             "max_results": max_results,
             "search_depth": "basic",
         }
-        resp = httpx.post(f"{TAVILY_GW}/search", json=payload, timeout=15.0)
+        resp = httpx.post(f"{TAVILY_GW}/v1/search", json=payload, timeout=15.0)
         resp.raise_for_status()
         data = resp.json()
         results = data.get("results") or []
