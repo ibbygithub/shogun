@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  platform-cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: platform-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      # TUNNEL_TOKEN must be set in .env (never committed to git)
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    networks:
+      - platform_net
+
+networks:
+  platform_net:
+    external: true
