@@ -8,15 +8,8 @@ import {
   InfoWindow,
   useMap,
 } from "@vis.gl/react-google-maps";
-import type { Poi } from "@/lib/types";
-
-// ── Hardcoded accommodation coordinates (matches TripMapInner) ─────────────────
-const ACCOMMODATIONS: Record<string, { lat: number; lng: number; label: string }> = {
-  osaka:    { lat: 34.7255, lng: 135.5185, label: "Tenjinbashi Queen Airbnb" },
-  kanazawa: { lat: 36.5613, lng: 136.6562, label: "Hotel Sanraku Kanazawa" },
-  tokyo:    { lat: 35.7358, lng: 139.7283, label: "Sugamo Airbnb" },
-  nara:     { lat: 34.6851, lng: 135.8048, label: "Nara Park (day trip)" },
-};
+import type { Poi, ItineraryLeg } from "@/lib/types";
+import { api } from "@/lib/api";
 
 // ── Category → pin colour mapping ─────────────────────────────────────────────
 interface PinStyle { bg: string; border: string; emoji: string }
@@ -168,6 +161,26 @@ function MarkerPin({
   );
 }
 
+// ── Geocoding helper (sessionStorage cache) ───────────────────────────────────
+async function geocodeAddress(address: string, apiKey: string): Promise<LatLng | null> {
+  const cacheKey = `geocode:${address}`;
+  try {
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) return JSON.parse(cached) as LatLng;
+  } catch { /* ok */ }
+  try {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.status === "OK" && data.results?.length > 0) {
+      const loc = data.results[0].geometry.location as LatLng;
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(loc)); } catch { /* ok */ }
+      return loc;
+    }
+  } catch { /* network error */ }
+  return null;
+}
+
 // ── POI type for guaranteed coords ────────────────────────────────────────────
 interface PoiWithCoords extends Poi {
   lat: number;
@@ -186,6 +199,29 @@ export default function PoisMapInner({ pois, city }: Props) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedPoi, setSelectedPoi] = useState<PoiWithCoords | null>(null);
   const [selectedAcc, setSelectedAcc] = useState<string | null>(null);
+  // Accommodation coords loaded from itinerary API + geocoded from real address
+  const [accCoords, setAccCoords] = useState<LatLng | null>(null);
+  const [accLabel, setAccLabel] = useState<string | null>(null);
+
+  // Fetch accommodation leg for this city from the itinerary, then geocode its address
+  useEffect(() => {
+    if (!apiKey || !city || city === "all") return;
+    (api.itinerary.list() as Promise<ItineraryLeg[]>)
+      .then(async (legs) => {
+        const acc = legs.find(
+          (l) =>
+            l.leg_type?.toLowerCase().includes("accommodation") &&
+            l.city?.toLowerCase() === city.toLowerCase()
+        );
+        if (!acc) return;
+        setAccLabel(acc.title);
+        const address = acc.address_en ?? acc.address_ja ?? "";
+        if (!address) return;
+        const coords = await geocodeAddress(address, apiKey);
+        if (coords) setAccCoords(coords);
+      })
+      .catch(() => { /* non-critical — map still shows POIs */ });
+  }, [city, apiKey]);
 
   const mappablePois = pois.filter(
     (p): p is PoiWithCoords =>
@@ -193,16 +229,14 @@ export default function PoisMapInner({ pois, city }: Props) {
       typeof p.lng === "number" && p.lng !== null
   );
 
-  const accommodation = ACCOMMODATIONS[city] ?? null;
-
   const allPoints: LatLng[] = [
     ...mappablePois.map((p) => ({ lat: p.lat, lng: p.lng })),
-    ...(accommodation ? [{ lat: accommodation.lat, lng: accommodation.lng }] : []),
+    ...(accCoords ? [accCoords] : []),
   ];
 
   const defaultCenter: LatLng =
-    accommodation
-      ? { lat: accommodation.lat, lng: accommodation.lng }
+    accCoords
+      ? accCoords
       : allPoints[0] ?? { lat: 34.6937, lng: 135.5023 };
 
   if (!apiKey) {
@@ -251,18 +285,18 @@ export default function PoisMapInner({ pois, city }: Props) {
           );
         })}
 
-        {/* Accommodation marker */}
-        {accommodation && (
+        {/* Accommodation marker — geocoded from real itinerary address */}
+        {accCoords && accLabel && (
           <AdvancedMarker
-            position={{ lat: accommodation.lat, lng: accommodation.lng }}
-            onClick={() => { setSelectedAcc(accommodation.label); setSelectedPoi(null); }}
+            position={accCoords}
+            onClick={() => { setSelectedAcc(accLabel); setSelectedPoi(null); }}
             zIndex={selectedAcc ? 100 : 10}
           >
             <MarkerPin
               pin={ACC_PIN}
               hovered={hoveredId === "acc"}
               selected={!!selectedAcc}
-              label={accommodation.label}
+              label={accLabel}
               subtitle="Your accommodation"
               onEnter={() => setHoveredId("acc")}
               onLeave={() => setHoveredId(null)}
@@ -325,15 +359,15 @@ export default function PoisMapInner({ pois, city }: Props) {
         )}
 
         {/* InfoWindow — accommodation */}
-        {selectedAcc && accommodation && (
+        {selectedAcc && accCoords && (
           <InfoWindow
-            position={{ lat: accommodation.lat, lng: accommodation.lng }}
+            position={accCoords}
             onCloseClick={() => setSelectedAcc(null)}
             pixelOffset={[0, -28]}
           >
             <div style={{ fontFamily: "inherit" }}>
               <div style={{ fontWeight: 700, fontSize: "0.87rem", marginBottom: "2px" }}>
-                🏠 {accommodation.label}
+                🏠 {accLabel}
               </div>
               <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>
                 Your accommodation in {city.charAt(0).toUpperCase() + city.slice(1)}

@@ -10,13 +10,6 @@ import {
 import type { ItineraryLeg, Poi } from "@/lib/types";
 import { api } from "@/lib/api";
 
-// ── Hardcoded accommodation coordinates ───────────────────────────────────────
-const ACCOMMODATIONS: Record<string, { lat: number; lng: number; label: string; city: string }> = {
-  osaka:    { lat: 34.7255, lng: 135.5185, label: "Tenjinbashi Queen Airbnb", city: "osaka" },
-  kanazawa: { lat: 36.5613, lng: 136.6562, label: "Hotel Sanraku Kanazawa",  city: "kanazawa" },
-  tokyo:    { lat: 35.7358, lng: 139.7283, label: "Sugamo Airbnb",           city: "tokyo" },
-};
-
 // ── City focus positions ───────────────────────────────────────────────────────
 const CITY_FOCUS = {
   all:      { lat: 36.2,    lng: 138.5,   zoom: 6  },
@@ -519,7 +512,6 @@ export default function TripMapInner({ height = "600px" }: TripMapInnerProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedLeg, setSelectedLeg] = useState<ItineraryLeg | null>(null);
   const [selectedPoi, setSelectedPoi] = useState<Poi | null>(null);
-  const [selectedAcc, setSelectedAcc] = useState<string | null>(null);
   const [cameraTarget, setCameraTarget] = useState<CameraTarget | null>(null);
   const [activeCity, setActiveCity] = useState<"all" | "osaka" | "kanazawa" | "tokyo">("all");
 
@@ -582,25 +574,15 @@ export default function TripMapInner({ height = "600px" }: TripMapInnerProps) {
     if (!poi.lat || !poi.lng) return;
     setSelectedPoi(poi);
     setSelectedLeg(null);
-    setSelectedAcc(null);
     setCameraTarget({ lat: poi.lat, lng: poi.lng, zoom: 16 });
-  };
-
-  const handleAccClick = (key: string) => {
-    const acc = ACCOMMODATIONS[key];
-    setSelectedAcc(acc.label);
-    setSelectedLeg(null);
-    setSelectedPoi(null);
-    setCameraTarget({ lat: acc.lat, lng: acc.lng, zoom: 16 });
   };
 
   const closePanel = () => {
     setSelectedLeg(null);
     setSelectedPoi(null);
-    setSelectedAcc(null);
   };
 
-  const panelOpen = !!(selectedLeg || selectedPoi || selectedAcc);
+  const panelOpen = !!(selectedLeg || selectedPoi);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -696,32 +678,7 @@ export default function TripMapInner({ height = "600px" }: TripMapInnerProps) {
                 onDone={() => setCameraTarget(null)}
               />
 
-              {/* Accommodation markers (hardcoded, always shown) */}
-              {Object.entries(ACCOMMODATIONS).map(([key, acc]) => {
-                const pinId = `acc-${key}`;
-                const isHov = hoveredId === pinId;
-                const isSel = selectedAcc === acc.label;
-                return (
-                  <AdvancedMarker
-                    key={pinId}
-                    position={{ lat: acc.lat, lng: acc.lng }}
-                    onClick={() => handleAccClick(key)}
-                    zIndex={isSel ? 100 : 10}
-                  >
-                    <MarkerPin
-                      pin={ACC_PIN}
-                      hovered={isHov}
-                      selected={isSel}
-                      label={acc.label}
-                      notes={`Your accommodation in ${acc.city}`}
-                      onEnter={() => setHoveredId(pinId)}
-                      onLeave={() => setHoveredId(null)}
-                    />
-                  </AdvancedMarker>
-                );
-              })}
-
-              {/* Itinerary leg markers (geocoded) */}
+              {/* Itinerary leg markers (geocoded from address_en/address_ja) */}
               {legs.map((leg) => {
                 const coords = geocoded[leg.id];
                 if (!coords) return null;
@@ -787,7 +744,7 @@ export default function TripMapInner({ height = "600px" }: TripMapInnerProps) {
         <SidePanel
           leg={selectedLeg}
           poi={selectedPoi}
-          accLabel={selectedAcc}
+          accLabel={null}
           onClose={closePanel}
         />
       </div>
