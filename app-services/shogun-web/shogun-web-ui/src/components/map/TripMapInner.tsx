@@ -566,7 +566,6 @@ export default function TripMapInner({ height = "600px" }: TripMapInnerProps) {
   const handleLegClick = (leg: ItineraryLeg, coords: LatLng) => {
     setSelectedLeg(leg);
     setSelectedPoi(null);
-    setSelectedAcc(null);
     setCameraTarget({ ...coords, zoom: 16 });
   };
 
