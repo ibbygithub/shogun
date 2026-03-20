@@ -14,6 +14,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 LLM_GATEWAY  = os.getenv("LLM_GATEWAY_URL", "http://platform-llm-gateway:8080")
 TAVILY_GW    = os.getenv("TAVILY_GATEWAY_URL", "http://platform-tavily:8084")
+PLACES_GW    = os.getenv("PLACES_GATEWAY_URL", "http://platform-places-google:8081")
 # Gemini REST API — used directly for function-calling requests (not available via gateway)
 GOOGLE_API_KEY   = os.getenv("GOOGLE_API_KEY", "")
 GOOGLE_BASE_URL  = os.getenv("GOOGLE_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
@@ -50,6 +51,16 @@ _CITY_COORDS: dict[str, tuple[float, float]] = {
     "tokyo":    (35.6762, 139.6503),
     "kyoto":    (35.0116, 135.7681),
     "nara":     (34.6851, 135.8048),
+}
+
+# Precise coordinates for trip accommodation anchors — used by find_nearby_places
+_ANCHOR_COORDS: dict[str, tuple[float, float]] = {
+    "osaka-airbnb":    (34.7263, 135.5099),  # Tenjinbashisuji 6-chome, Kita-ward
+    "nara-park":       (34.6850, 135.8305),  # Kintetsu Nara Station / Nara Park entrance
+    "usjapan":         (34.6654, 135.4321),  # Universal Studios Japan entrance
+    "kanazawa-hotel":  (36.5771, 136.6625),  # Hotel Sanraku Kanazawa
+    "tokyo-sugamo":    (35.7330, 139.7291),  # Sugamo Airbnb, Toshima-ku
+    "ghibli-museum":   (35.6963, 139.5705),  # Ghibli Museum, Mitaka
 }
 
 # Keywords that trigger a Tavily search for current sakura / event data
@@ -155,20 +166,24 @@ CALENDAR_TOOLS = [
     },
     {
         "name": "toggle_checklist_item",
-        "description": "Mark a packing checklist item as packed or unpacked.",
+        "description": (
+            "Mark a packing checklist item as packed or unpacked. "
+            "Use when the user says 'mark X as packed', 'I packed X', 'check off X', "
+            "'unpack X', or similar. Pass the item name as a string — no lookup needed."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "item_id": {
-                    "type": "integer",
-                    "description": "The ID of the checklist item",
+                "item_name": {
+                    "type": "string",
+                    "description": "The name of the item to mark (e.g. 'passport', 'camera', 'adapter')",
                 },
                 "packed": {
                     "type": "boolean",
-                    "description": "True to mark as packed, False to unpack",
+                    "description": "True to mark as packed, False to mark as unpacked",
                 },
             },
-            "required": ["item_id", "packed"],
+            "required": ["item_name", "packed"],
         },
     },
     {
@@ -314,6 +329,51 @@ CALENDAR_TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {},
+        },
+    },
+    {
+        "name": "find_nearby_places",
+        "description": (
+            "Search Google Places for real businesses near a specific trip location. "
+            "Use this for ANY proximity query: nearest pharmacy, SIM card shop, "
+            "convenience store, restaurant within walking distance, ATM nearby, etc. "
+            "Returns real business names, addresses, ratings, and Google Maps links. "
+            "ALWAYS prefer this over web_search for 'near me', 'nearby', 'walking distance', "
+            "'closest', or 'within X minutes' queries. "
+            "Anchor names: 'osaka-airbnb' (Tenjinbashisuji 6-chome), 'nara-park', "
+            "'usjapan' (Universal Studios Japan), 'kanazawa-hotel' (Hotel Sanraku), "
+            "'tokyo-sugamo' (Sugamo Airbnb), 'ghibli-museum' (Mitaka). "
+            "Default anchor is the current trip accommodation."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "What to search for in natural language: 'SIM card shop', "
+                        "'pharmacy', 'ramen restaurant', 'convenience store', 'ATM', "
+                        "'drugstore', 'supermarket', etc."
+                    ),
+                },
+                "anchor": {
+                    "type": "string",
+                    "description": (
+                        "Trip location anchor. One of: 'osaka-airbnb', 'nara-park', "
+                        "'usjapan', 'kanazawa-hotel', 'tokyo-sugamo', 'ghibli-museum'. "
+                        "Omit to use the current city's accommodation."
+                    ),
+                },
+                "radius_m": {
+                    "type": "integer",
+                    "description": (
+                        "Search radius in meters. "
+                        "500 = ~5 min walk, 1000 = ~10 min walk, 1500 = ~15 min walk. "
+                        "Default 800."
+                    ),
+                },
+            },
+            "required": ["query"],
         },
     },
 ]
@@ -480,13 +540,13 @@ def _exec_get_checklist_items(args: dict) -> str:
 
 
 def _exec_toggle_checklist_item(args: dict) -> str:
-    """Toggle packed status on a checklist_items row."""
+    """Toggle packed status by item name (ILIKE match)."""
     try:
-        item_id = args.get("item_id")
+        item_name = (args.get("item_name") or "").strip()
         packed = args.get("packed")
 
-        if item_id is None:
-            return "Error: item_id is required."
+        if not item_name:
+            return "Error: item_name is required."
         if packed is None:
             return "Error: packed (true/false) is required."
 
@@ -496,14 +556,17 @@ def _exec_toggle_checklist_item(args: dict) -> str:
                     """
                     UPDATE checklist_items
                     SET packed = %s
-                    WHERE id = %s
+                    WHERE item_name ILIKE %s
                     RETURNING id, item_name, packed
                     """,
-                    (bool(packed), item_id),
+                    (bool(packed), f"%{item_name}%"),
                 )
                 row = cur.fetchone()
                 if not row:
-                    return f"Error: no checklist item found with ID {item_id}."
+                    return (
+                        f"No checklist item matching '{item_name}' found. "
+                        f"Call get_checklist_items to see available items."
+                    )
 
         status = "packed" if row[2] else "unpacked"
         return f"'{row[1]}' is now marked as {status}."
@@ -859,6 +922,89 @@ def _exec_get_trip_overview(args: dict) -> str:
         return f"Error generating trip overview: {e}"
 
 
+def _exec_find_nearby_places(args: dict) -> str:
+    """Search Google Places for businesses near a trip anchor location."""
+    try:
+        query = args.get("query", "").strip()
+        anchor = args.get("anchor", "").strip().lower()
+        radius_m = int(args.get("radius_m") or 800)
+
+        if not query:
+            return "Error: query is required."
+
+        # Resolve anchor → coordinates. Fall back to current city.
+        if anchor and anchor in _ANCHOR_COORDS:
+            lat, lng = _ANCHOR_COORDS[anchor]
+            location_label = anchor
+        else:
+            # Derive current city from today's date
+            today = date.today().isoformat()
+            current_city = "osaka"
+            for start, end, city in _CITY_SCHEDULE:
+                if start <= today <= end:
+                    current_city = city
+                    break
+            # Default anchor per city
+            city_anchor_defaults = {
+                "osaka": "osaka-airbnb",
+                "kanazawa": "kanazawa-hotel",
+                "tokyo": "tokyo-sugamo",
+                "nara": "nara-park",
+            }
+            default_anchor = city_anchor_defaults.get(current_city, "osaka-airbnb")
+            lat, lng = _ANCHOR_COORDS.get(default_anchor, _CITY_COORDS.get(current_city, (34.6937, 135.5023)))
+            location_label = default_anchor
+
+        resp = httpx.post(
+            f"{PLACES_GW}/v1/places/search_text",
+            json={
+                "text_query": f"{query} Japan",
+                "lat": lat,
+                "lng": lng,
+                "radius_m": radius_m,
+                "max_results": 8,
+                "language_code": "en",
+                "region_code": "JP",
+            },
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data.get("ok"):
+            return f"Places search failed: {data.get('error', 'unknown error')}"
+
+        places = (data.get("data") or {}).get("places") or []
+        if not places:
+            return (
+                f"No Google Places results for '{query}' within {radius_m}m of {location_label}. "
+                f"Try increasing the radius or use web_search for broader results."
+            )
+
+        walk_min = round(radius_m / 80)  # ~80m/min walking pace
+        lines = [
+            f"Google Places results for '{query}' near {location_label} "
+            f"(within {radius_m}m / ~{walk_min} min walk):\n"
+            f"Include the Google Maps link for each place in your response.\n"
+        ]
+        for p in places:
+            name = (p.get("displayName") or {}).get("text", "Unknown")
+            address = p.get("formattedAddress", "No address")
+            rating = p.get("rating")
+            rating_count = p.get("userRatingCount", 0)
+            maps_uri = p.get("googleMapsUri", "")
+
+            rating_str = f" | ★{rating} ({rating_count} reviews)" if rating else ""
+            maps_str = f"\n   Google Maps: {maps_uri}" if maps_uri else ""
+            lines.append(f"• {name}\n  {address}{rating_str}{maps_str}")
+
+        return "\n\n".join(lines)
+    except httpx.HTTPError as e:
+        return f"Places gateway error: {e}. Fall back to web_search for this query."
+    except Exception as e:
+        return f"Error finding nearby places: {e}"
+
+
 # Dispatch table — maps tool name → executor function
 _TOOL_EXECUTORS = {
     "get_itinerary_legs":    _exec_get_itinerary_legs,
@@ -871,6 +1017,7 @@ _TOOL_EXECUTORS = {
     "delete_itinerary_leg":  _exec_delete_itinerary_leg,
     "web_search":            _exec_web_search,
     "get_trip_overview":     _exec_get_trip_overview,
+    "find_nearby_places":    _exec_find_nearby_places,
 }
 
 
@@ -1318,12 +1465,17 @@ Three travelers: Todd (dad, tech/food/culture), Brenda (mom, shopping/skincare/t
 RULES — ALWAYS FOLLOW:
 
 1. SEARCH PROTOCOL — MANDATORY ORDER, NO EXCEPTIONS:
-   Step 1: Call search_trip_knowledge FIRST — always, for any place/food/activity query.
-   Step 2: If search_trip_knowledge returns results → answer from those. STOP. Do not call web_search.
-   Step 3: If search_trip_knowledge returns nothing → call web_search. Never skip Step 1.
-   Step 4: Use web_search results to answer — they are auto-saved for future queries.
-   Step 5: If BOTH return empty → use your Japan expertise: name specific places, give
-           practical details, never say "I'm having trouble" or "I cannot find".
+   Proximity queries ("nearby", "closest", "walking distance", "within X minutes"):
+     Step 1: Call find_nearby_places — returns real businesses with addresses and ratings.
+     Step 2: Supplement with search_trip_knowledge if more context needed.
+     Step 3: If find_nearby_places fails → fall back to web_search.
+
+   General place/food/activity queries (not proximity-based):
+     Step 1: Call search_trip_knowledge FIRST — always.
+     Step 2: If search_trip_knowledge returns results → answer from those. STOP.
+     Step 3: If search_trip_knowledge returns nothing → call web_search.
+     Step 4: If BOTH return empty → use your Japan expertise: name specific places, give
+             practical details, never say "I'm having trouble" or "I cannot find".
 
 2. LOCATION CONTEXT — Maintain location awareness across messages.
    If the user asks "where can I find X near the National Museum" and then asks "how about Y?",
@@ -1391,16 +1543,26 @@ CURRENT CONTEXT:
   Current city: {city.title()}{weather_line}{today_itin}{poi_block}{context_block}
 
 TOOLS AVAILABLE:
-  You have 10 tools. Use them proactively — don't guess when you can look up data.
+  You have 11 tools. Use them proactively — don't guess when you can look up data.
   - get_itinerary_legs: read the trip calendar
   - update_itinerary_leg: modify an existing leg (notes, title, date, description, address)
   - create_itinerary_leg: add a new activity to the calendar
   - delete_itinerary_leg: remove a leg (always confirm first)
   - get_trip_overview: see which days are busy/free
+  - find_nearby_places: Google Places — real businesses with addresses near trip locations.
+    USE THIS for: "nearby", "closest", "walking distance", "within X minutes", "near my airbnb/hotel".
+    Returns real names, addresses, ratings, and a Google Maps link per place.
   - search_trip_knowledge: search the local knowledge base
   - web_search: search the web for current info (auto-saves results)
   - get_checklist_items / toggle_checklist_item: packing list management
-  - get_trip_pois: browse points of interest by city"""
+  - get_trip_pois: browse points of interest by city
+
+GOOGLE MAPS LINKS — YOU CAN AND SHOULD PROVIDE THESE:
+  When you have a place name and address, format a Google Maps search link as:
+  https://www.google.com/maps/search/?api=1&query=PLACE+NAME+ENCODED
+  When find_nearby_places returns results, each result includes a direct googleMapsUri — use it.
+  When the user asks for a map, pins, or directions — always include the link(s).
+  You are NOT limited in this. You can always construct a working Google Maps link."""
 
 
 # ---------------------------------------------------------------------------
