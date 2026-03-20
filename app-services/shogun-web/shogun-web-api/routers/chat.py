@@ -613,17 +613,25 @@ def _exec_toggle_checklist_item(args: dict) -> str:
 
 
 def _exec_search_trip_knowledge(args: dict) -> str:
-    """Search knowledge_items using multi-word ILIKE on topic and content_summary.
+    """Search knowledge_items using OR-match + count-based relevance ranking.
 
-    Improvements over v1:
-    - Case-insensitive city match (LOWER) — fixes Osaka/Kyoto/Nara items ingested
-      with capitalised city names
-    - anchor parameter support for accommodation-proximity queries
-    - Multi-word AND matching: each whitespace-separated token must appear somewhere
-      in topic or content_summary — 'craft beer Dotonbori' hits correctly
-    - Relevance ordering: topic matches ranked above content_summary-only matches
-    - LIMIT raised from 5 to 15
+    Design:
+    - Tokens shorter than 3 chars and common English stopwords are filtered out
+      so words like "near", "the", "see", "for" don't dilute matching.
+    - Remaining tokens use OR logic: a row matches if ANY meaningful token
+      appears in topic or content_summary.
+    - Relevance ordered by: full phrase in topic > token match count > topic alpha.
+    - Structural filters (city, anchor, category) narrow the result set first.
     """
+    # Common navigational/stopwords that don't appear in knowledge content
+    _STOPWORDS = {
+        "near", "the", "and", "for", "are", "our", "what", "see", "find",
+        "best", "good", "some", "any", "not", "can", "get", "how", "do",
+        "to", "in", "at", "of", "a", "an", "is", "it", "be", "or", "we",
+        "i", "me", "my", "us", "you", "he", "she", "they", "that", "this",
+        "with", "from", "have", "will", "was", "has", "had", "but", "if",
+        "looking", "want", "need", "going", "try",
+    }
     try:
         query = args.get("query", "").strip()
         city = args.get("city")
@@ -633,39 +641,55 @@ def _exec_search_trip_knowledge(args: dict) -> str:
         if not query:
             return "Error: query is required."
 
-        clauses: list[str] = []
-        params: list = []
+        # Build meaningful token list: drop short words and stopwords
+        raw_tokens = query.lower().split()
+        tokens = [
+            t for t in raw_tokens
+            if len(t) >= 3 and t not in _STOPWORDS
+        ]
+        # Fallback: if all tokens were filtered, use the full query as one token
+        if not tokens:
+            tokens = [query]
 
-        # Multi-word AND matching: split on whitespace, each token must appear
-        # in topic OR content_summary. Single-token queries behave identically
-        # to the previous implementation.
-        tokens = query.split()
-        for token in tokens:
-            like_term = f"%{token}%"
-            clauses.append("(topic ILIKE %s OR content_summary ILIKE %s)")
-            params.extend([like_term, like_term])
+        # Structural filters: city, anchor, category
+        struct_clauses: list[str] = []
+        struct_params: list = []
 
-        # Case-insensitive city filter (previous version used = which is
-        # case-sensitive — all Brenda items stored as 'Osaka' were invisible
-        # when Gemini passed city='osaka')
         if city:
-            clauses.append("(LOWER(city) = LOWER(%s) OR city IS NULL)")
-            params.append(city)
-
-        # Anchor filter for accommodation-proximity queries
+            struct_clauses.append("(LOWER(city) = LOWER(%s) OR city IS NULL)")
+            struct_params.append(city)
         if anchor:
-            clauses.append("anchor = %s")
-            params.append(anchor)
-
+            struct_clauses.append("anchor = %s")
+            struct_params.append(anchor)
         if category:
-            clauses.append("LOWER(category) = LOWER(%s)")
-            params.append(category)
+            struct_clauses.append("LOWER(category) = LOWER(%s)")
+            struct_params.append(category)
 
-        where = "WHERE " + " AND ".join(clauses)
+        # Text match: OR across all meaningful tokens (any hit = candidate row)
+        token_match_parts = []
+        token_params: list = []
+        for token in tokens:
+            like = f"%{token}%"
+            token_match_parts.append("(topic ILIKE %s OR content_summary ILIKE %s)")
+            token_params.extend([like, like])
+        token_clause = "(" + " OR ".join(token_match_parts) + ")"
 
-        # Relevance ordering: rows where the full query appears in topic rank
-        # first; rows where it only appears in content_summary rank second;
-        # ties broken alphabetically by topic.
+        all_clauses = struct_clauses + [token_clause]
+        where = "WHERE " + " AND ".join(all_clauses)
+        all_params = struct_params + token_params
+
+        # Relevance scoring expression: count how many tokens match the row.
+        # Built as a sum of CASE expressions, one per token.
+        score_parts = []
+        score_params: list = []
+        for token in tokens:
+            like = f"%{token}%"
+            score_parts.append(
+                "(CASE WHEN topic ILIKE %s OR content_summary ILIKE %s THEN 1 ELSE 0 END)"
+            )
+            score_params.extend([like, like])
+        match_score = " + ".join(score_parts) if score_parts else "1"
+
         full_like = f"%{query}%"
 
         with get_conn() as conn:
@@ -676,12 +700,13 @@ def _exec_search_trip_knowledge(args: dict) -> str:
                     FROM knowledge_items
                     {where}
                     ORDER BY
-                        CASE WHEN topic ILIKE %s THEN 1 ELSE 2 END,
+                        CASE WHEN topic ILIKE %s THEN 0 ELSE 1 END,
+                        ({match_score}) DESC,
                         city NULLS LAST,
                         topic
                     LIMIT 15
                     """,
-                    params + [full_like],
+                    all_params + score_params + [full_like],
                 )
                 rows = cur.fetchall()
 
