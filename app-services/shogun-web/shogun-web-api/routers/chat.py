@@ -213,22 +213,33 @@ CALENDAR_TOOLS = [
         "description": (
             "Search the trip knowledge base for local recommendations, restaurants, shops, temples, "
             "and travel tips. Use this when the user asks about places to visit, where to eat, "
-            "shopping, or local knowledge."
+            "shopping, or local knowledge. Always call this FIRST before web_search for any "
+            "question about places, food, shopping, or activities during the trip."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query",
+                    "description": "Search query — use plain English, include district/neighborhood if known (e.g. 'craft beer bar Dotonbori Osaka')",
                 },
                 "city": {
                     "type": "string",
-                    "description": "Filter by city. Omit for all cities.",
+                    "description": "Filter by city: 'osaka', 'kyoto', 'nara', 'kanazawa', 'tokyo'. Omit to search all cities.",
+                },
+                "anchor": {
+                    "type": "string",
+                    "description": "Filter by accommodation anchor for proximity queries: 'osaka-airbnb', 'kanazawa-hotel', 'nara-park', 'tokyo-sugamo', 'ghibli-museum', 'usjapan'. Use when the user asks what is near their current accommodation.",
                 },
                 "category": {
                     "type": "string",
-                    "description": "Filter by category: restaurant, vintage, skincare, temple, street_food, museum, etc.",
+                    "description": (
+                        "Filter by category. Options: dining, coffee_cafe, craft_beer, shopping, "
+                        "anime_manga, tech_electronics, skincare, jewelry_artisan, eyewear_prescription, "
+                        "knife_shop, ceramics, shopping_crafts, sake_brewery, museum, temple, shrine, "
+                        "park, sightseeing, market, neighborhood, convenience_store, restaurant, "
+                        "vintage, street_food, practical, events, sakura. Omit to search all categories."
+                    ),
                 },
             },
             "required": ["query"],
@@ -602,10 +613,21 @@ def _exec_toggle_checklist_item(args: dict) -> str:
 
 
 def _exec_search_trip_knowledge(args: dict) -> str:
-    """Search knowledge_items using ILIKE on topic and content_summary."""
+    """Search knowledge_items using multi-word ILIKE on topic and content_summary.
+
+    Improvements over v1:
+    - Case-insensitive city match (LOWER) — fixes Osaka/Kyoto/Nara items ingested
+      with capitalised city names
+    - anchor parameter support for accommodation-proximity queries
+    - Multi-word AND matching: each whitespace-separated token must appear somewhere
+      in topic or content_summary — 'craft beer Dotonbori' hits correctly
+    - Relevance ordering: topic matches ranked above content_summary-only matches
+    - LIMIT raised from 5 to 15
+    """
     try:
         query = args.get("query", "").strip()
         city = args.get("city")
+        anchor = args.get("anchor")
         category = args.get("category")
 
         if not query:
@@ -614,19 +636,37 @@ def _exec_search_trip_knowledge(args: dict) -> str:
         clauses: list[str] = []
         params: list = []
 
-        # Full-text-style ILIKE across topic and content_summary
-        clauses.append("(topic ILIKE %s OR content_summary ILIKE %s)")
-        like_term = f"%{query}%"
-        params.extend([like_term, like_term])
+        # Multi-word AND matching: split on whitespace, each token must appear
+        # in topic OR content_summary. Single-token queries behave identically
+        # to the previous implementation.
+        tokens = query.split()
+        for token in tokens:
+            like_term = f"%{token}%"
+            clauses.append("(topic ILIKE %s OR content_summary ILIKE %s)")
+            params.extend([like_term, like_term])
 
+        # Case-insensitive city filter (previous version used = which is
+        # case-sensitive — all Brenda items stored as 'Osaka' were invisible
+        # when Gemini passed city='osaka')
         if city:
-            clauses.append("(city = %s OR city IS NULL)")
-            params.append(city.lower())
+            clauses.append("(LOWER(city) = LOWER(%s) OR city IS NULL)")
+            params.append(city)
+
+        # Anchor filter for accommodation-proximity queries
+        if anchor:
+            clauses.append("anchor = %s")
+            params.append(anchor)
+
         if category:
-            clauses.append("category = %s")
-            params.append(category.lower())
+            clauses.append("LOWER(category) = LOWER(%s)")
+            params.append(category)
 
         where = "WHERE " + " AND ".join(clauses)
+
+        # Relevance ordering: rows where the full query appears in topic rank
+        # first; rows where it only appears in content_summary rank second;
+        # ties broken alphabetically by topic.
+        full_like = f"%{query}%"
 
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -635,10 +675,13 @@ def _exec_search_trip_knowledge(args: dict) -> str:
                     SELECT id, city, category, topic, content_summary
                     FROM knowledge_items
                     {where}
-                    ORDER BY city NULLS LAST, topic
-                    LIMIT 5
+                    ORDER BY
+                        CASE WHEN topic ILIKE %s THEN 1 ELSE 2 END,
+                        city NULLS LAST,
+                        topic
+                    LIMIT 15
                     """,
-                    params,
+                    params + [full_like],
                 )
                 rows = cur.fetchall()
 
