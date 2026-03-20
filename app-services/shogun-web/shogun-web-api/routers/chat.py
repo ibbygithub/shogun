@@ -56,11 +56,11 @@ _CITY_COORDS: dict[str, tuple[float, float]] = {
 
 # Precise coordinates for trip accommodation anchors — used by find_nearby_places
 _ANCHOR_COORDS: dict[str, tuple[float, float]] = {
-    "osaka-airbnb":    (34.7263, 135.5099),  # Tenjinbashisuji 6-chome, Kita-ward
+    "osaka-airbnb":    (34.7085, 135.5105),  # 大阪市北区浪花町10-12 (geocoded via GSI)
     "nara-park":       (34.6850, 135.8305),  # Kintetsu Nara Station / Nara Park entrance
     "usjapan":         (34.6654, 135.4321),  # Universal Studios Japan entrance
-    "kanazawa-hotel":  (36.5771, 136.6625),  # Hotel Sanraku Kanazawa
-    "tokyo-sugamo":    (35.7330, 139.7291),  # Sugamo Airbnb, Toshima-ku
+    "kanazawa-hotel":  (36.5704, 136.6588),  # 石川県金沢市尾張町1-1-1 Hotel Sanraku (geocoded via GSI)
+    "tokyo-sugamo":    (35.7395, 139.7312),  # 東京都豊島区巣鴨4-37-6 (geocoded via GSI)
     "ghibli-museum":   (35.6963, 139.5705),  # Ghibli Museum, Mitaka
 }
 
@@ -367,9 +367,9 @@ CALENDAR_TOOLS = [
             "Returns real business names, addresses, ratings, and Google Maps links. "
             "ALWAYS prefer this over web_search for 'near me', 'nearby', 'walking distance', "
             "'closest', or 'within X minutes' queries. "
-            "Anchor names: 'osaka-airbnb' (Tenjinbashisuji 6-chome), 'nara-park', "
-            "'usjapan' (Universal Studios Japan), 'kanazawa-hotel' (Hotel Sanraku), "
-            "'tokyo-sugamo' (Sugamo Airbnb), 'ghibli-museum' (Mitaka). "
+            "Anchor names: 'osaka-airbnb' (Airbnb at 大阪市北区浪花町10-12), 'nara-park', "
+            "'usjapan' (Universal Studios Japan), 'kanazawa-hotel' (Hotel Sanraku at 金沢市尾張町1-1-1), "
+            "'tokyo-sugamo' (Airbnb at 東京都豊島区巣鴨4-37-6), 'ghibli-museum' (Mitaka). "
             "Default anchor is the current trip accommodation."
         ),
         "parameters": {
@@ -1748,17 +1748,19 @@ TOOLS AVAILABLE:
   - get_checklist_items / toggle_checklist_item: packing list management
   - get_trip_pois: browse points of interest by city
 
-GOOGLE MAPS LINKS — YOU CAN AND SHOULD PROVIDE THESE:
-  When you have a place name and address, format a Google Maps search link as:
-  https://www.google.com/maps/search/?api=1&query=PLACE+NAME+ENCODED
-  When find_nearby_places returns results, each result includes a direct googleMapsUri — use it.
-  When the user asks for a map, pins, or directions — always include the link(s).
-  You are NOT limited in this. You can always construct a working Google Maps link.
-
-10. LINKS AND MAPS — ALWAYS DELIVER IN THE SAME RESPONSE:
-   Never say "I will provide the links" or "give me a moment" — include everything in the
-   current response. If find_nearby_places returns pre-built direction links, copy them
-   exactly as given. Do NOT construct your own Google Maps URLs.
+10. LINKS AND MAPS — RULES YOU MUST FOLLOW:
+   a) NEVER construct Google Maps direction URLs yourself. Direction links always come from
+      the find_nearby_places tool. If the user asks for directions to a place, call
+      find_nearby_places — the tool returns pre-built walking direction links with the
+      correct starting coordinates. Manually constructed URLs use wrong coordinates.
+   b) For place view links (not directions), use the googleMapsUri from find_nearby_places results.
+   c) Deliver all links in the same response — never say "I will provide the links shortly."
+   d) NEVER say "I am under development", "I am still learning", or "I apologize for my
+      limitations." You are a fully deployed travel concierge. If you make an error, say
+      "Let me fix that" and correct it. No self-deprecating disclaimers.
+   e) When referencing the Osaka Airbnb, always say "大阪市北区浪花町10-12" — never describe
+      it as "near Tenjinbashisuji Station" or any other station. The accommodation address
+      is in the ACCOMMODATIONS section above and must be used exactly as written.
 
 TABELOG RESTAURANT REVIEWS — YOU CAN AND SHOULD PROVIDE THESE:
   When the user asks about restaurant reviews, ratings, or wants Tabelog links/info:
