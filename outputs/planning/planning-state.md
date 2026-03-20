@@ -107,6 +107,45 @@ Plan: `outputs/planning/skill-system-plan.md` (Approved)
 
 ---
 
+## Knowledge Pipeline — Approved Plan (2026-03-20)
+
+Plan: `outputs/planning/knowledge-pipeline-plan.md`
+
+### Taxonomy (approved 2026-03-20)
+dining, coffee_cafe, craft_beer, shopping, anime_manga, tech_electronics,
+skincare, jewelry_artisan, eyewear_prescription, knife_shop, ceramics,
+shopping_crafts, sake_brewery, museum, temple, shrine, park, sightseeing,
+market, neighborhood, convenience_store
+
+### Traveler interest matrix (settled — do not re-ask)
+- Brenda: eyewear (same-day prescription), knives (artisan names known), skincare, handmade jewelry/bazaars, seafood, vegetarian (animal stock ok), convenience store
+- Madeline: anime/manga/plushes/stickers, vintage clothing, antiques, chicken+noodles, convenience store
+- Todd: vintage clothing, antiques, tech gear (ESP32/robot kits), craft beer, authentic Japanese burger, beef, noodles
+- Shared: standing ramen, conveyor sushi, food halls, street food, independent cafes, no fast food chains
+
+### Spatial model (approved)
+Tier 1 (anchor-tagged): accommodation zone proximity
+Tier 2 (city-tagged, anchor=NULL): destination zones — found via text search on topic
+
+### Phases
+| Phase | Task | Status |
+|-------|------|--------|
+| 0 | Fix search_trip_knowledge: LOWER() city, anchor param, LIMIT 15, relevance order, multi-word | Not started |
+| 1a | Osaka ingestion — 38 queries across 6 zones | Not started |
+| 1b | Kanazawa/Kyoto/Nara ingestion — 45 queries | Not started |
+| 2 | RAG validation — 5 test queries, citation check | Not started |
+| 3 | Tokyo expansion | Blocked: Brenda's Tokyo plan |
+
+### Target volumes
+Osaka: 130+ items total | Kanazawa: 50+ | Kyoto: 40+ | Nara: 25+
+Script: `tools/ingest_knowledge_pipeline.py --city {osaka|kanazawa|kyoto|nara}`
+
+### Critical prerequisite (Phase 0)
+City match in search_trip_knowledge uses `=` (case-sensitive) — all Brenda items
+(city='Osaka', 'Kyoto', etc.) are currently invisible to the AI. Must fix before ingestion.
+
+---
+
 ## Active Work — Pre-Trip (Departure Mar 23, 4 days)
 
 | Item | Description | Phase | Status | Last Updated |
@@ -115,8 +154,9 @@ Plan: `outputs/planning/skill-system-plan.md` (Approved)
 | **Laptop reliability** | Windows power settings (no sleep on AC), Windows Update maintenance window 3-5am. Docker Desktop no longer relevant — laptop is control plane only. | Ops | In progress | 2026-03-20 |
 | **Brenda + Madeline onboarding** | Need Telegram IDs + Google emails. Required for user seeding and Cloudflare Access policy. | Ops | Blocked: Todd | 2026-03-16 |
 | **Remaining dashboard tiles** | AQI (WAQI), JPY/USD (frankfurter.app), transit disruption alerts (Tavily), what's-on-this-weekend (Tavily), Windy radar embed. | Web UI | ✅ Completed 2026-03-16 | 2026-03-16 |
-| **Knowledge pipeline + Research interface** | knowledge_items table, anchor model, 3 entry points, cost controls. Taxonomy session: Tuesday 2026-03-18 after Brenda trip details. | Data Lake | Blocked: taxonomy session | 2026-03-16 |
-| **RAG pipeline update** | shogun-core to query knowledge_items alongside trip_pois for richer responses | Data Lake | Blocked: knowledge_items schema | 2026-03-16 |
+| **Knowledge pipeline — Phase 0** | Fix search_trip_knowledge query engine (case, anchor, limit, relevance). PREREQUISITE before ingestion. | Data Lake | Not started | 2026-03-20 |
+| **Knowledge pipeline — Phase 1** | Bulk Tavily ingestion 83 queries across Osaka/Kanazawa/Kyoto/Nara. Script: tools/ingest_knowledge_pipeline.py | Data Lake | Not started — blocked on Phase 0 | 2026-03-20 |
+| **Knowledge pipeline — Phase 2** | RAG validation: 5 test queries, confirm tool_actions badge shows search_trip_knowledge | Data Lake | Not started — blocked on Phase 1 | 2026-03-20 |
 | Reddit Gateway Phase 1 | DB setup (pgvector, reddit schema, reddit_app user) — container already running on svcnode-01 | Platform Phase 1 | Not started — no blockers | 2026-03-16 |
 | shogun-places-ingester | Add docker-compose.yml, wire up to platform_net, one-shot run for 6 location anchors | Platform Phase 2 | Not started | 2026-03-16 |
 | YouTube Data API | Integration deferred — Todd still needs to obtain API key | Feature | Blocked: Todd | 2026-03-16 |
@@ -367,6 +407,7 @@ Checklist items: 15 packing items seeded
 
 | Document | Path | Status |
 |----------|------|--------|
+| Knowledge Pipeline Plan | outputs/planning/knowledge-pipeline-plan.md | Approved 2026-03-20 |
 | Skill System Plan | outputs/planning/skill-system-plan.md | Approved — Day 1 complete |
 | Migration Guide | outputs/planning/migration-guide.md | Complete |
 | Disaster Recovery Checklist | outputs/planning/disaster-recovery-checklist.md | Complete |
