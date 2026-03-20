@@ -8,15 +8,41 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function formatContent(text: string): string {
-  // Escape HTML first to prevent XSS, then apply markdown-like formatting
-  let safe = escapeHtml(text);
+function applyInlineFormatting(safe: string): string {
   return safe
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:0.85em">$1</code>')
     .replace(/^- /gm, '• ')
     .replace(/¥([\d,]+)/g, '<span style="font-weight:600">¥$1</span>');
+}
+
+function formatContent(text: string): string {
+  // Extract markdown links [text](url) BEFORE escaping so URLs are preserved intact.
+  // All non-link text is escaped then formatted; links become clickable <a> tags.
+  const linkPattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+  const parts: string[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = linkPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(applyInlineFormatting(escapeHtml(text.slice(lastIndex, match.index))));
+    }
+    const linkText = escapeHtml(match[1]);
+    const href = match[2].replace(/"/g, '%22');
+    parts.push(
+      `<a href="${href}" target="_blank" rel="noopener noreferrer" ` +
+      `style="color:#1d4ed8;text-decoration:underline;word-break:break-all">${linkText}</a>`
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(applyInlineFormatting(escapeHtml(text.slice(lastIndex))));
+  }
+
+  return parts.join('');
 }
 
 export default function ChatMessage({ message }: Props) {
@@ -42,6 +68,8 @@ export default function ChatMessage({ message }: Props) {
         lineHeight: 1.5,
         boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
         whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        overflowWrap: "break-word",
       }}
         dangerouslySetInnerHTML={isUser ? undefined : { __html: formatContent(message.content) }}
       >
