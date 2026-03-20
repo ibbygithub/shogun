@@ -50,6 +50,9 @@ export default function ChatMessage({ message }: Props) {
   const toolActions = (!isUser && message.tool_actions && message.tool_actions.length > 0)
     ? message.tool_actions
     : null;
+  // Show "no tools" badge only when tool_actions is explicitly an empty array (not undefined).
+  // undefined = old message loaded before this feature; [] = AI answered without calling any tool.
+  const noToolsCalled = !isUser && Array.isArray(message.tool_actions) && message.tool_actions.length === 0;
 
   return (
     <div style={{
@@ -76,8 +79,8 @@ export default function ChatMessage({ message }: Props) {
         {isUser ? message.content : undefined}
       </div>
 
-      {/* Tool action badges — shown only on AI messages that used tools */}
-      {toolActions && (
+      {/* Source badges — always shown on AI messages so user knows how the answer was produced */}
+      {(toolActions || noToolsCalled) && (
         <div style={{
           maxWidth: "75%",
           marginTop: "0.25rem",
@@ -85,7 +88,7 @@ export default function ChatMessage({ message }: Props) {
           flexDirection: "column",
           gap: "0.2rem",
         }}>
-          {toolActions.map((action, idx) => (
+          {toolActions && toolActions.map((action, idx) => (
             <div key={idx} style={{
               display: "inline-flex",
               alignItems: "center",
@@ -101,6 +104,21 @@ export default function ChatMessage({ message }: Props) {
               <span>{action.summary}</span>
             </div>
           ))}
+          {noToolsCalled && (
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.3rem",
+              padding: "2px 8px",
+              background: "#f8fafc",
+              border: "1px solid #cbd5e1",
+              borderRadius: "6px",
+              fontSize: "0.72rem",
+              color: "#64748b",
+            }}>
+              <span>No tools called — answered from conversation context</span>
+            </div>
+          )}
         </div>
       )}
     </div>

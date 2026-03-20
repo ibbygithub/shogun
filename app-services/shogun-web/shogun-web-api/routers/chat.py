@@ -1005,21 +1005,40 @@ def _exec_find_nearby_places(args: dict) -> str:
         if not data.get("ok"):
             return f"Places search failed: {data.get('error', 'unknown error')}"
 
-        places = (data.get("data") or {}).get("places") or []
-        if not places:
+        raw_places = (data.get("data") or {}).get("places") or []
+        if not raw_places:
             return (
-                f"No Google Places results for '{query}' within {radius_m}m of {location_label}. "
+                f"No Google Places results for '{query}' within {radius_m}m of {anchor_label}. "
                 f"Try increasing the radius or use web_search for broader results."
             )
 
-        # Infer city from anchor label for knowledge_items storage
+        # Hard-filter to requested radius — locationBias is a soft hint; Google returns
+        # results outside the radius without this filter.
+        places_with_dist = []
+        for p in raw_places:
+            loc = p.get("location") or {}
+            place_lat = loc.get("latitude")
+            place_lng = loc.get("longitude")
+            if place_lat and place_lng:
+                dist_m = round(_haversine_m(lat, lng, place_lat, place_lng))
+                if dist_m <= radius_m:
+                    places_with_dist.append((dist_m, place_lat, place_lng, p))
+            # Places without coordinates pass through unfiltered
+        places_with_dist.sort(key=lambda x: x[0])
+
+        if not places_with_dist:
+            return (
+                f"No Google Places results within {radius_m}m of {anchor_label} for '{query}'. "
+                f"Google returned results but all were further than {radius_m}m. "
+                f"Try a larger radius (e.g. radius_m={radius_m * 2})."
+            )
+
+        # Infer city and category for knowledge_items storage
         anchor_city_map = {
             "osaka-airbnb": "osaka", "nara-park": "nara", "usjapan": "osaka",
             "kanazawa-hotel": "kanazawa", "tokyo-sugamo": "tokyo", "ghibli-museum": "tokyo",
         }
         place_city = anchor_city_map.get(location_label, _current_city())
-
-        # Infer category from query keywords (mirrors web_search categorisation)
         query_lower = query.lower()
         place_category = "practical"
         cat_keywords = {
@@ -1038,63 +1057,61 @@ def _exec_find_nearby_places(args: dict) -> str:
                 place_category = cat
                 break
 
-        anchor_label = _ANCHOR_LABELS.get(location_label, location_label)
-        lines = [
-            f"Google Places results for '{query}' near {anchor_label}.\n"
-            f"IMPORTANT: Include ALL pre-built links below exactly as shown. Do NOT construct "
-            f"your own Google Maps URLs — use only the links provided here.\n"
+        # Build Gemini context (plain text — AI reads this to write its narrative)
+        # and a pre-formatted block (rich markdown — appended verbatim to bypass Gemini rewriting)
+        anchor_short = anchor_label.split(" (")[0]  # e.g. "Osaka Airbnb"
+        gemini_lines = [
+            f"Google Places found {len(places_with_dist)} result(s) for '{query}' "
+            f"within {radius_m}m of {anchor_label}. "
+            f"Pre-formatted place cards with walking direction links are appended to your response verbatim — "
+            f"do NOT restate distances or construct your own map links. "
+            f"Briefly introduce the results, then let the formatted cards do the work.\n"
         ]
+        formatted_lines = [f"**{query.title()} near {anchor_short}** ({radius_m}m / ~{radius_m // 80} min walk)\n"]
+
         saved_count = 0
-        result_count = 0
-        for p in places:
+        for i, (dist_m, place_lat, place_lng, p) in enumerate(places_with_dist, 1):
             name = (p.get("displayName") or {}).get("text", "Unknown")
             address = p.get("formattedAddress", "No address")
             rating = p.get("rating")
             rating_count = p.get("userRatingCount", 0)
             maps_uri = p.get("googleMapsUri", "")
-            loc = p.get("location") or {}
-            place_lat = loc.get("latitude")
-            place_lng = loc.get("longitude")
 
-            # Calculate real distance and walking time from anchor
-            if place_lat and place_lng:
-                dist_m = round(_haversine_m(lat, lng, place_lat, place_lng))
-                walk_min = max(1, round(dist_m / 80))
-                dist_str = f"{dist_m}m (~{walk_min} min walk)"
-                # Build accurate directions links using real coordinates
-                dir_from_anchor = (
-                    f"https://www.google.com/maps/dir/?api=1"
-                    f"&origin={lat},{lng}"
-                    f"&destination={place_lat},{place_lng}"
-                    f"&travelmode=walking"
-                )
-                dir_from_here = (
-                    f"https://www.google.com/maps/dir/?api=1"
-                    f"&destination={place_lat},{place_lng}"
-                    f"&travelmode=walking"
-                )
-            else:
-                dist_str = f"within {radius_m}m"
-                dir_from_anchor = ""
-                dir_from_here = ""
+            walk_min = max(1, round(dist_m / 80))
+            rating_str = f" — ★{rating} ({rating_count} reviews)" if rating else ""
 
-            rating_str = f" | ★{rating} ({rating_count} reviews)" if rating else ""
+            # Gemini gets a plain summary
+            gemini_lines.append(f"{i}. {name} — {dist_m}m ({walk_min} min walk) — {address[:50]}")
 
-            entry = f"• **{name}**\n  {address}{rating_str}\n  Distance: {dist_str}"
+            # Pre-formatted card with working links (appended verbatim, Gemini never rewrites)
+            dir_from_anchor = (
+                f"https://www.google.com/maps/dir/?api=1"
+                f"&origin={lat},{lng}"
+                f"&destination={place_lat},{place_lng}"
+                f"&travelmode=walking"
+            )
+            dir_from_here = (
+                f"https://www.google.com/maps/dir/?api=1"
+                f"&destination={place_lat},{place_lng}"
+                f"&travelmode=walking"
+            )
+            card = (
+                f"**{i}. {name}**{rating_str}\n"
+                f"   {address}\n"
+                f"   Distance: {dist_m}m (~{walk_min} min walk)\n"
+            )
             if maps_uri:
-                entry += f"\n  [View on map]({maps_uri})"
-            if dir_from_anchor:
-                entry += f"\n  [Walking directions from {anchor_label}]({dir_from_anchor})"
-            if dir_from_here:
-                entry += f"\n  [Navigate from my current location]({dir_from_here})"
-            lines.append(entry)
-            result_count += 1
+                card += f"   [View on map]({maps_uri})"
+            card += (
+                f" | [Walk from {anchor_short}]({dir_from_anchor})"
+                f" | [Navigate from my location]({dir_from_here})\n"
+            )
+            formatted_lines.append(card)
 
-            # Auto-save each place to knowledge_items (dedup on Google Maps URI)
+            # Auto-save to knowledge_items
             try:
                 rating_info = f" | Rating: {rating} ({rating_count} reviews)" if rating else ""
-                dist_info = f" | Distance: {dist_str}" if place_lat else ""
-                summary = f"Address: {address}{rating_info}{dist_info} | Near: {anchor_label}"
+                summary = f"Address: {address} | {dist_m}m (~{walk_min} min walk){rating_info} | Near: {anchor_label}"
                 with get_conn() as conn:
                     with conn.cursor() as cur:
                         if maps_uri:
@@ -1115,11 +1132,22 @@ def _exec_find_nearby_places(args: dict) -> str:
                         )
                 saved_count += 1
             except Exception:
-                pass  # Don't fail the search if save fails
+                pass
 
         if saved_count:
-            lines.append(f"[{saved_count}/{result_count} places saved to knowledge base]")
-        return "\n\n".join(lines)
+            formatted_lines.append(f"*{saved_count}/{len(places_with_dist)} places saved to local knowledge base.*")
+
+        gemini_context = "\n".join(gemini_lines)
+        formatted_block = "\n".join(formatted_lines)
+
+        # Return context + marked block. _run_chat_with_tools strips the block before
+        # passing to Gemini and appends it verbatim to the final response.
+        return (
+            gemini_context
+            + "\n##FORMATTED_BLOCK_START##\n"
+            + formatted_block
+            + "\n##FORMATTED_BLOCK_END##"
+        )
     except httpx.HTTPError as e:
         return f"Places gateway error: {e}. Fall back to web_search for this query."
     except Exception as e:
@@ -1252,8 +1280,12 @@ def _run_chat_with_tools(
         contents = [{"role": "user", "parts": [{"text": user_message}]}]
 
     tool_actions: list[dict] = []
+    formatted_blocks: list[str] = []  # Pre-formatted content that bypasses Gemini synthesis
     MAX_TOOL_ROUNDS = 5
     seen_calls: set[str] = set()  # dedup: prevent identical tool+args from running twice
+
+    _BLOCK_START = "##FORMATTED_BLOCK_START##"
+    _BLOCK_END   = "##FORMATTED_BLOCK_END##"
 
     for _round in range(MAX_TOOL_ROUNDS):
         raw = _call_gemini_with_tools(contents, system_prompt, CALENDAR_TOOLS)
@@ -1261,7 +1293,10 @@ def _run_chat_with_tools(
 
         if not function_calls:
             # Model returned a plain text response — we're done
-            return _extract_gemini_text(raw), tool_actions
+            reply = _extract_gemini_text(raw)
+            if formatted_blocks:
+                reply = reply.rstrip() + "\n\n" + "\n\n".join(formatted_blocks)
+            return reply, tool_actions
 
         # Deduplicate: skip any call with identical tool+args to a previous round
         deduped: list[dict] = []
@@ -1286,6 +1321,16 @@ def _run_chat_with_tools(
             else:
                 result_text = f"Error: unknown tool '{tool_name}'"
 
+            # Extract any pre-formatted block from the tool result.
+            # The block is stored for verbatim append; Gemini only sees the context summary.
+            gemini_text = result_text
+            if _BLOCK_START in result_text and _BLOCK_END in result_text:
+                bs = result_text.index(_BLOCK_START)
+                be = result_text.index(_BLOCK_END)
+                block_content = result_text[bs + len(_BLOCK_START):be].strip()
+                formatted_blocks.append(block_content)
+                gemini_text = result_text[:bs].strip()
+
             tool_actions.append({
                 "tool": tool_name,
                 "summary": _tool_action_summary(tool_name, tool_args, result_text),
@@ -1293,7 +1338,7 @@ def _run_chat_with_tools(
             tool_result_parts.append({
                 "functionResponse": {
                     "name": tool_name,
-                    "response": {"result": result_text},
+                    "response": {"result": gemini_text},
                 }
             })
 
@@ -1307,7 +1352,10 @@ def _run_chat_with_tools(
     # Safety exit: if we hit MAX_TOOL_ROUNDS without a text response,
     # do a final call with toolConfig set to TEXT_ONLY to force a response
     raw = _call_gemini_with_tools(contents, system_prompt, tools=[])
-    return _extract_gemini_text(raw), tool_actions
+    reply = _extract_gemini_text(raw)
+    if formatted_blocks:
+        reply = reply.rstrip() + "\n\n" + "\n\n".join(formatted_blocks)
+    return reply, tool_actions
 
 
 def _tool_action_summary(tool_name: str, args: dict, result: str) -> str:
@@ -2070,9 +2118,8 @@ def chat(body: ChatMessage, request: Request, user: User = Depends(get_current_u
         "role": "assistant",
         "content": response_text,
         "timestamp": time.time(),
+        "tool_actions": tool_actions,  # always store, even [] — frontend uses this to show "no tools" badge
     }
-    if tool_actions:
-        assistant_entry["tool_actions"] = tool_actions
     history.append(assistant_entry)
     _save_history(user.id, history)
 
@@ -2107,7 +2154,7 @@ def get_history(request: Request, user: User = Depends(get_current_user)):
     result = []
     for h in history:
         entry: dict = {"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")}
-        if h.get("tool_actions"):
+        if "tool_actions" in h:  # include even when empty list — lets frontend show "no tools" badge
             entry["tool_actions"] = h["tool_actions"]
         result.append(entry)
     return result
@@ -2173,7 +2220,7 @@ def activate_conversation(conv_id: str, request: Request, user: User = Depends(g
     messages = []
     for h in history:
         entry: dict = {"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")}
-        if h.get("tool_actions"):
+        if "tool_actions" in h:
             entry["tool_actions"] = h["tool_actions"]
         messages.append(entry)
     return {"id": conv_id, "messages": messages}
