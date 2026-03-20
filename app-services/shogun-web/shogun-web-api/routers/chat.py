@@ -1012,8 +1012,9 @@ def _exec_find_nearby_places(args: dict) -> str:
                 f"Try increasing the radius or use web_search for broader results."
             )
 
-        # Hard-filter to requested radius — locationBias is a soft hint; Google returns
-        # results outside the radius without this filter.
+        # Calculate real distance for all results and sort closest-first.
+        # locationBias is a soft hint so results outside the requested radius can appear —
+        # we label them as beyond-range rather than silently removing them.
         places_with_dist = []
         for p in raw_places:
             loc = p.get("location") or {}
@@ -1021,17 +1022,10 @@ def _exec_find_nearby_places(args: dict) -> str:
             place_lng = loc.get("longitude")
             if place_lat and place_lng:
                 dist_m = round(_haversine_m(lat, lng, place_lat, place_lng))
-                if dist_m <= radius_m:
-                    places_with_dist.append((dist_m, place_lat, place_lng, p))
-            # Places without coordinates pass through unfiltered
+            else:
+                dist_m = None
+            places_with_dist.append((dist_m if dist_m is not None else 9999999, place_lat, place_lng, p, dist_m))
         places_with_dist.sort(key=lambda x: x[0])
-
-        if not places_with_dist:
-            return (
-                f"No Google Places results within {radius_m}m of {anchor_label} for '{query}'. "
-                f"Google returned results but all were further than {radius_m}m. "
-                f"Try a larger radius (e.g. radius_m={radius_m * 2})."
-            )
 
         # Infer city and category for knowledge_items storage
         anchor_city_map = {
@@ -1057,55 +1051,72 @@ def _exec_find_nearby_places(args: dict) -> str:
                 place_category = cat
                 break
 
-        # Build Gemini context (plain text — AI reads this to write its narrative)
-        # and a pre-formatted block (rich markdown — appended verbatim to bypass Gemini rewriting)
         anchor_short = anchor_label.split(" (")[0]  # e.g. "Osaka Airbnb"
+        walk_limit = radius_m // 80  # requested walk time in minutes
+
+        # Build Gemini context (plain text) and pre-formatted block (verbatim output).
+        # Gemini context includes the direction URLs so follow-up questions about directions
+        # can be answered without re-calling the tool.
         gemini_lines = [
-            f"Google Places found {len(places_with_dist)} result(s) for '{query}' "
-            f"within {radius_m}m of {anchor_label}. "
-            f"Pre-formatted place cards with walking direction links are appended to your response verbatim — "
-            f"do NOT restate distances or construct your own map links. "
-            f"Briefly introduce the results, then let the formatted cards do the work.\n"
+            f"Google Places: {len(places_with_dist)} result(s) for '{query}' near {anchor_label}. "
+            f"Requested radius: {radius_m}m (~{walk_limit} min walk). "
+            f"Results sorted by distance. Some may exceed the requested radius — their distance is shown.\n"
+            f"Walking direction links (from anchor and from current GPS) are included per place.\n"
+            f"Pre-formatted place cards are appended to your response — do NOT restate or reformat them.\n"
         ]
-        formatted_lines = [f"**{query.title()} near {anchor_short}** ({radius_m}m / ~{radius_m // 80} min walk)\n"]
+        formatted_lines = [f"**{query.title()} near {anchor_short}**\n"]
 
         saved_count = 0
-        for i, (dist_m, place_lat, place_lng, p) in enumerate(places_with_dist, 1):
+        for i, (_sort_dist, place_lat, place_lng, p, dist_m) in enumerate(places_with_dist, 1):
             name = (p.get("displayName") or {}).get("text", "Unknown")
             address = p.get("formattedAddress", "No address")
             rating = p.get("rating")
             rating_count = p.get("userRatingCount", 0)
             maps_uri = p.get("googleMapsUri", "")
 
-            walk_min = max(1, round(dist_m / 80))
+            if dist_m is not None:
+                walk_min = max(1, round(dist_m / 80))
+                dist_label = f"{dist_m}m (~{walk_min} min walk)"
+                if dist_m > radius_m:
+                    dist_label += f" — beyond {radius_m}m request"
+            else:
+                dist_label = "distance unknown"
+                walk_min = None
+
             rating_str = f" — ★{rating} ({rating_count} reviews)" if rating else ""
 
-            # Gemini gets a plain summary
-            gemini_lines.append(f"{i}. {name} — {dist_m}m ({walk_min} min walk) — {address[:50]}")
+            if place_lat and place_lng:
+                dir_from_anchor = (
+                    f"https://www.google.com/maps/dir/?api=1"
+                    f"&origin={lat},{lng}"
+                    f"&destination={place_lat},{place_lng}"
+                    f"&travelmode=walking"
+                )
+                dir_from_here = (
+                    f"https://www.google.com/maps/dir/?api=1"
+                    f"&destination={place_lat},{place_lng}"
+                    f"&travelmode=walking"
+                )
+            else:
+                dir_from_anchor = ""
+                dir_from_here = ""
 
-            # Pre-formatted card with working links (appended verbatim, Gemini never rewrites)
-            dir_from_anchor = (
-                f"https://www.google.com/maps/dir/?api=1"
-                f"&origin={lat},{lng}"
-                f"&destination={place_lat},{place_lng}"
-                f"&travelmode=walking"
+            # Gemini context — includes URLs so follow-up direction questions don't need tool re-call
+            gemini_lines.append(
+                f"{i}. {name} — {dist_label} — {address[:60]}"
+                + (f"\n   Walk from {anchor_short}: {dir_from_anchor}" if dir_from_anchor else "")
+                + (f"\n   From current location: {dir_from_here}" if dir_from_here else "")
             )
-            dir_from_here = (
-                f"https://www.google.com/maps/dir/?api=1"
-                f"&destination={place_lat},{place_lng}"
-                f"&travelmode=walking"
-            )
-            card = (
-                f"**{i}. {name}**{rating_str}\n"
-                f"   {address}\n"
-                f"   Distance: {dist_m}m (~{walk_min} min walk)\n"
-            )
+
+            # Pre-formatted card (appended verbatim to final response)
+            card = f"**{i}. {name}**{rating_str}\n   {address}\n   {dist_label}\n"
             if maps_uri:
                 card += f"   [View on map]({maps_uri})"
-            card += (
-                f" | [Walk from {anchor_short}]({dir_from_anchor})"
-                f" | [Navigate from my location]({dir_from_here})\n"
-            )
+            if dir_from_anchor:
+                card += f" | [Walk from {anchor_short}]({dir_from_anchor})"
+            if dir_from_here:
+                card += f" | [Navigate from my location]({dir_from_here})"
+            card += "\n"
             formatted_lines.append(card)
 
             # Auto-save to knowledge_items
@@ -1426,9 +1437,10 @@ def _tool_action_summary(tool_name: str, args: dict, result: str) -> str:
         query = args.get("query", "?")
         anchor = args.get("anchor") or "current accommodation"
         radius_m = args.get("radius_m") or 800
-        # Count results in the tool output
-        result_count = result.count("• **") if result else 0
-        saved = result.count("saved to knowledge base") > 0
+        # Count numbered place cards in the tool output (format: "1. Name", "2. Name", ...)
+        import re as _re
+        result_count = len(_re.findall(r"^\d+\. ", result or "", _re.MULTILINE))
+        saved = "saved to local knowledge base" in (result or "")
         save_str = " — saved to DB" if saved else ""
         return f"Google Places: '{query}' near {anchor} ({radius_m}m) → {result_count} results{save_str}"
 
