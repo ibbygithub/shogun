@@ -1,5 +1,5 @@
 # Planning State — Shogun
-Last updated: 2026-03-17
+Last updated: 2026-03-19 (skill system complete; Cloudflare Tunnel live)
 
 ## Project Summary
 
@@ -8,41 +8,36 @@ Delivered via Telegram (shogun-core) and a web frontend (shogun-web).
 The Telegram bot handles live location-aware recommendations; the web app gives
 Brenda an itinerary editing surface and all three travelers a unified trip view.
 
-**Current infrastructure: all 10 services running on Docker Desktop (Windows laptop).**
-Laptop stays home in California unattended during the trip (Mar 23–Apr 9).
-Public access via Cloudflare Tunnel → shogun.ibbytech.com (in progress — see blockers).
-Startup/shutdown: `scripts/start-shogun.ps1` / `scripts/stop-shogun.ps1`
+**Current infrastructure: three-node Docker deployment. Laptop is control plane only — Docker Desktop disabled.**
+Public access via Cloudflare Tunnel → shogun.ibbytech.com (live as of 2026-03-19).
 
-## Infrastructure — Current State (2026-03-15)
+## Infrastructure — Current State (2026-03-18 three-node migration, verified 2026-03-20)
 
-All 10 containers validated on Docker Desktop. Both repos pushed to GitHub (develop + master/main).
+| Node | Container | Status | Port |
+|------|-----------|--------|------|
+| brainnode-01 | shogun-core | running | 0.0.0.0:8082 |
+| brainnode-01 | shogun-web-api | running | 0.0.0.0:8090 |
+| brainnode-01 | shogun-web-ui | running | 0.0.0.0:3010 |
+| brainnode-01 | platform-cloudflared | running | (tunnel) |
+| svcnode-01 | platform-valkey | running | 0.0.0.0:6379 |
+| svcnode-01 | platform-llm-gateway | running | 0.0.0.0:8080 |
+| svcnode-01 | platform-telegram-gateway | running | 0.0.0.0:3001 |
+| svcnode-01 | platform-tavily | running | 0.0.0.0:8084 |
+| svcnode-01 | platform-scraper-api | running | 0.0.0.0:8083 |
+| svcnode-01 | platform-reddit-gateway | running | 0.0.0.0:8082 |
+| svcnode-01 | platform-places-google | running | 8081 (internal only) |
+| dbnode-01 | PostgreSQL 17 | running | shogun_v1 database |
 
-| Container | Status | Notes |
-|-----------|--------|-------|
-| platform-postgres | healthy | Named volume platform-postgres-data |
-| platform-valkey | running | 127.0.0.1:6379 (localhost only) |
-| platform-llm-gateway | running | Gemini 2.0 Flash |
-| platform-telegram-gateway | running | Polling mode, no public URL needed |
-| platform-places-google | running | Pulls image (harmless warning on build) |
-| platform-tavily | running | |
-| platform-scraper-api | running | |
-| shogun-core | running | Containerized 2026-03-15 (was systemd on brainnode-01) |
-| shogun-web-api | running | SHOGUN_BYPASS_AUTH=true (Cloudflare handles auth) |
-| shogun-web-ui | running | http://localhost:3010 |
+**Traefik:** Disabled. Cloudflare Tunnel proxies directly to shogun-web-ui:3000 on brainnode-01.
 
-**Not running (intentional):** platform-reddit-gateway (DB setup needed first — Phase 1 below)
-**Traefik:** Disabled. Will NOT be restored pre-trip. Cloudflare Tunnel proxies directly to shogun-web-ui:3000.
-
-## RECOVERY COMPLETE — 2026-03-15
-✅ All 10 containers running and validated
-✅ Telegram bot live (polling mode)
-✅ LLM pipeline working (Gemini 2.0 Flash via llm-gateway)
-✅ Location trigger logic validated
-✅ Web UI loading at localhost:3010
-✅ Web AI chat working
+## RECOVERY COMPLETE — 2026-03-15 → THREE-NODE MIGRATION COMPLETE — 2026-03-18
+✅ All 11 containers running on correct nodes (validated 2026-03-20)
+✅ Telegram bot live (polling mode on svcnode-01)
+✅ LLM pipeline working (Gemini 2.0 Flash via llm-gateway on svcnode-01)
+✅ Web UI accessible at shogun.ibbytech.com (Cloudflare Tunnel live 2026-03-19)
+✅ Web AI chat working — 15/15 tool tests passed (2026-03-19)
 ✅ Database schema applied, Todd seeded (11 itinerary legs, 30 POIs, 8 preferences)
-✅ Start/stop scripts with directory preservation
-✅ Both repos committed and pushed (develop + master/main)
+✅ Laptop Docker Desktop disabled — laptop is control plane only
 
 ## Completed — 2026-03-15 to 2026-03-16
 
@@ -73,17 +68,56 @@ All 10 containers validated on Docker Desktop. Both repos pushed to GitHub (deve
 | Tokyo knowledge seeding | 100 records across shopping, skincare, temples, food, museum categories. | Data Lake | ✅ Completed 2026-03-17 | 2026-03-17 |
 | checklist_items migration | 15 packing items seeded. shogun_app grants on checklist_items + knowledge_items. | Database | ✅ Completed 2026-03-17 | 2026-03-17 |
 
-## Active Work — Pre-Trip (Departure Mar 23, 7 days)
+## Skill System Initiative — In Progress (2026-03-19)
+
+Plan: `outputs/planning/skill-system-plan.md` (Approved)
+
+### Phase 0: Structural Cleanup — ✅ Complete
+- Migrated shogun `.agent/` → `.claude/` (rules 10-12, skills, assets)
+- Deleted 8 duplicated files from platform (rules, skills, templates)
+- Updated platform CLAUDE.md to reference foundation via `--add-dir`
+- Foundation skills migrated to `.claude/skills/<name>/SKILL.md` format
+
+### Day 1 (Mar 19) — ✅ Complete (4/4 skills + 3 reference docs)
+| Skill | Repo | Status |
+|-------|------|--------|
+| team-orchestrator | foundation | ✅ SKILL.md + references/skills-inventory.md |
+| google-places-expert | platform | ✅ SKILL.md + references/api-catalogue.md |
+| tavily-search-expert | platform | ✅ SKILL.md + references/japan-search-guide.md |
+| frontend-design | shogun | ✅ SKILL.md + references/design-system.md |
+
+### Day 2 (Mar 20) — ✅ Complete (4/4 skills + 2 reference docs)
+| Skill | Repo | Status |
+|-------|------|--------|
+| mobile-ux | shogun | ✅ SKILL.md + references/mobile-viewport.md |
+| concierge-brain | shogun | ✅ SKILL.md |
+| telegram-admin | platform | ✅ SKILL.md |
+| llm-gateway-admin | platform | ✅ SKILL.md + references/function-calling.md |
+
+### Day 3 (Mar 21) — ✅ Complete (3/3 skills)
+| Skill | Repo | Status |
+|-------|------|--------|
+| shogun-dba | shogun | ✅ SKILL.md |
+| git-lifecycle | foundation | ✅ SKILL.md |
+| documentation-standard | foundation | ✅ SKILL.md |
+
+**Skill System Initiative: COMPLETE — All 11 skills delivered across 3 repos.**
+
+### Day 4 (Mar 22) — Data load + dry-run (depends on Day 3 taxonomy)
+
+---
+
+## Active Work — Pre-Trip (Departure Mar 23, 4 days)
 
 | Item | Description | Phase | Status | Last Updated |
 |------|-------------|-------|--------|--------------|
-| **Cloudflare Tunnel + Access** | Public access to shogun.ibbytech.com from Japan. cloudflared container → web-ui. Google IdP auth. Todd must move DNS first — 24-48h propagation. | Public Access | Blocked: Todd DNS + GCP | 2026-03-16 |
-| **Laptop reliability** | Windows power settings (no sleep on AC), Docker Desktop auto-start, Windows Update maintenance window 3-5am. Must be done before Mar 23. | Ops | Not started | 2026-03-16 |
+| **Cloudflare Tunnel + Access** | Public access to shogun.ibbytech.com from Japan. cloudflared container → web-ui. Google IdP auth. DNS moved to Cloudflare, Zero Trust configured, GCP OAuth complete. | Public Access | ✅ Complete 2026-03-19 | 2026-03-19 |
+| **Laptop reliability** | Windows power settings (no sleep on AC), Windows Update maintenance window 3-5am. Docker Desktop no longer relevant — laptop is control plane only. | Ops | In progress | 2026-03-20 |
 | **Brenda + Madeline onboarding** | Need Telegram IDs + Google emails. Required for user seeding and Cloudflare Access policy. | Ops | Blocked: Todd | 2026-03-16 |
 | **Remaining dashboard tiles** | AQI (WAQI), JPY/USD (frankfurter.app), transit disruption alerts (Tavily), what's-on-this-weekend (Tavily), Windy radar embed. | Web UI | ✅ Completed 2026-03-16 | 2026-03-16 |
 | **Knowledge pipeline + Research interface** | knowledge_items table, anchor model, 3 entry points, cost controls. Taxonomy session: Tuesday 2026-03-18 after Brenda trip details. | Data Lake | Blocked: taxonomy session | 2026-03-16 |
 | **RAG pipeline update** | shogun-core to query knowledge_items alongside trip_pois for richer responses | Data Lake | Blocked: knowledge_items schema | 2026-03-16 |
-| Reddit Gateway Phase 1 | DB setup (pgvector, reddit schema, reddit_app user), .env Docker Desktop fixes, add to start script | Platform Phase 1 | Not started — no blockers | 2026-03-16 |
+| Reddit Gateway Phase 1 | DB setup (pgvector, reddit schema, reddit_app user) — container already running on svcnode-01 | Platform Phase 1 | Not started — no blockers | 2026-03-16 |
 | shogun-places-ingester | Add docker-compose.yml, wire up to platform_net, one-shot run for 6 location anchors | Platform Phase 2 | Not started | 2026-03-16 |
 | YouTube Data API | Integration deferred — Todd still needs to obtain API key | Feature | Blocked: Todd | 2026-03-16 |
 | Printable itinerary | Standalone bilingual HTML — full trip details | MVP 6 | Not started | 2026-03-16 |
@@ -193,40 +227,34 @@ Full list of search terms per anchor/category per city. Planning session Tuesday
 - **Auth:** Cloudflare Access + Google IdP. App keeps `SHOGUN_BYPASS_AUTH=true` — Cloudflare is the auth wall.
 - **Flow:** Phone in Japan → shogun.ibbytech.com → Cloudflare edge → Access auth → Tunnel → cloudflared → shogun-web-ui:3000
 
-### What Todd must do first (browser work, no code)
-1. **Move ibbytech.com DNS to Cloudflare nameservers** — change in Namecheap → Domain → Nameservers.
-   Currently DNS is Namecheap-managed. Cloudflare Access REQUIRES the zone on Cloudflare DNS.
-   Allow 24-48h propagation (usually faster). This is the longest lead-time item — do it first.
-2. **Cloudflare Zero Trust** — dash.cloudflare.com → Zero Trust → enable free tier (up to 50 users)
-   → Networks → Tunnels → Create tunnel → name it `shogun-laptop` → choose Docker connector → copy TUNNEL_TOKEN
-   → Add public hostname: `shogun.ibbytech.com` → Service: `http://shogun-web-ui:3000`
-3. **Google Cloud Console** — check https://console.cloud.google.com for existing project.
-   Need OAuth 2.0 client ID + secret for Cloudflare Access Google IdP.
-4. **Cloudflare Access Application** — attach Google IdP, set policy to allow specific Google emails.
+### Setup — ✅ Complete (2026-03-19)
+1. **ibbytech.com DNS → Cloudflare nameservers:** ✅ Done
+2. **Cloudflare Zero Trust + Tunnel (`shogun-laptop`):** ✅ Done — public hostname `shogun.ibbytech.com` → `http://shogun-web-ui:3000`
+3. **Google Cloud OAuth 2.0:** ✅ Done — client ID + secret configured in Cloudflare Access Google IdP
+4. **Cloudflare Access Application:** ✅ Done — Google IdP attached, Access policy active
+5. **cloudflared container:** ✅ Running on brainnode-01 — `app-services/compose/docker-compose.shogun.yml`
 
-### What Claude Code does after Todd has TUNNEL_TOKEN
-- Add cloudflared Docker container to `platform/infra/compose/docker-compose.infra.yml`
-- One env var: TUNNEL_TOKEN
-- Add to start-shogun.ps1 (starts with infra layer)
-- Test from phone
+## Cloudflare Status — ✅ Complete (2026-03-19)
 
-## Blockers (Cloudflare)
-
-- **ibbytech.com DNS zone on Cloudflare:** ❌ Currently Namecheap-managed — Todd must move nameservers
-- **Cloudflare Zero Trust enabled:** TBD — Todd
-- **TUNNEL_TOKEN obtained:** TBD — Todd (from Zero Trust dashboard after creating tunnel)
-- **Google Cloud OAuth client ID + secret:** TBD — Todd (check console.cloud.google.com for existing project)
+- **ibbytech.com DNS zone on Cloudflare:** ✅ Done — nameservers moved from Namecheap to Cloudflare
+- **Cloudflare Zero Trust enabled:** ✅ Done
+- **TUNNEL_TOKEN obtained:** ✅ Done — cloudflared container running
+- **Google Cloud OAuth client ID + secret:** ✅ Done — GCP OAuth configured
+- **Cloudflare Access Application:** ✅ Done — Google IdP attached
 - **Brenda and Madeline Google email addresses:** TBD — needed for Access policy
 - **Brenda and Madeline Telegram IDs:** TBD — needed for seeding user profiles
 
-## Laptop Unattended Risk (Mar 23–Apr 9)
+## Unattended Risk (Mar 23–Apr 9)
+
+**Production host is brainnode-01 (192.168.71.222) — Docker containers. Laptop is control plane only.**
 
 | Risk | Mitigation |
 |------|------------|
-| Windows Update auto-restart | Set maintenance window to 3-5am, disable auto-restart |
-| Docker Desktop not starting after reboot | Enable "Start Docker Desktop when you log in" + Windows auto-login |
-| Laptop sleeps | Power settings: disable sleep on AC power, screen off is OK |
-| Power outage | Nothing to do — acknowledge risk |
+| brainnode-01 power loss | Docker restart policies: `unless-stopped` — containers restart automatically |
+| brainnode-01 network loss | Cloudflare Tunnel reconnects automatically |
+| svcnode-01 power loss | Same `unless-stopped` policy on all platform containers |
+| Laptop Windows Update auto-restart | Set maintenance window to 3-5am — laptop only needs to be up for SSH/git operations |
+| Laptop sleeps | Power settings: disable sleep on AC power (laptop is control plane — less critical) |
 
 ## Trip Itinerary Reference
 
@@ -315,11 +343,11 @@ Checklist items: 15 packing items seeded
 - Risk: ibbytech.com DNS must move from Namecheap to Cloudflare. Allow 48h propagation.
 - Risk: Laptop unattended for 17 days. Windows reliability mitigations required (see above).
 
-### Laptop as production host — 2026-03-15
-- Decision: Windows laptop stays home in California, running Docker Desktop, for Mar 23–Apr 9
-- Reasoning: Fastest path. No VPS cost. cloudflared handles dynamic IP and reconnection.
-- Risk accepted: Windows Update reboot could take down all services. Mitigation: maintenance window + auto-start config.
-- Alternative considered: Hetzner CX22 VPS (~$4/mo). Deferred — user may switch before departure.
+### Laptop as production host — SUPERSEDED 2026-03-18
+- Original decision (2026-03-15): Windows laptop running Docker Desktop for Mar 23–Apr 9
+- Superseded: Three-node migration complete 2026-03-18. All services moved to svcnode-01 + brainnode-01.
+- Laptop Docker Desktop permanently disabled. Laptop is control plane (code editing, git, SSH) only.
+- Rationale: Three-node lab was restored. Proper architecture supersedes emergency laptop deployment.
 
 ## Backlog (Post-trip or deferred)
 
@@ -339,6 +367,7 @@ Checklist items: 15 packing items seeded
 
 | Document | Path | Status |
 |----------|------|--------|
+| Skill System Plan | outputs/planning/skill-system-plan.md | Approved — Day 1 complete |
 | Migration Guide | outputs/planning/migration-guide.md | Complete |
 | Disaster Recovery Checklist | outputs/planning/disaster-recovery-checklist.md | Complete |
 | Shogun Web Plan | outputs/planning/shogun-web-plan.md | Approved |

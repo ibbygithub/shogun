@@ -1,0 +1,33 @@
+{
+  "version": "2.1",
+  "planes": {
+    "control": {
+      "host": "ibbytech-laptop",
+      "os": "Windows 11",
+      "allowed_actions": ["coding", "git", "powershell", "ssh-initiation"]
+    },
+    "execution": {
+      "nodes": [
+        {
+          "hostname": "svcnode-01",
+          "ip": "192.168.71.220",
+          "roles": ["Docker runtime", "Traefik", "Telegram bot", "API gateways"],
+          "persona": "devops-agent"
+        },
+        {
+          "hostname": "dbnode-01",
+          "ip": "192.168.71.221",
+          "roles": ["PostgreSQL shogun_v1 persistence"],
+          "persona": "dba-agent"
+        },
+        {
+          "hostname": "brainnode-01",
+          "ip": "192.168.71.222",
+          "roles": ["Shogun application tier (Docker)", "shogun-core :8082", "shogun-web-api :8090", "shogun-web-ui :3010", "platform-cloudflared"],
+          "persona": "devops-agent"
+        }
+      ]
+    }
+  },
+  "persistence_authority": "dbnode-01"
+}
