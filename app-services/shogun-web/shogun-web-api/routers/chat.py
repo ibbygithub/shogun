@@ -315,6 +315,11 @@ CALENDAR_TOOLS = [
                     "type": "string",
                     "description": "City context to add to the search",
                 },
+                "include_domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Restrict search to specific domains. Use ['tabelog.com'] for Tabelog restaurant reviews and ratings.",
+                },
             },
             "required": ["query"],
         },
@@ -765,11 +770,14 @@ def _exec_web_search(args: dict) -> str:
         if city and city.lower() not in query.lower():
             search_query = f"{query} {city} Japan"
 
+        include_domains = args.get("include_domains", [])
         payload = {
             "query": search_query,
             "max_results": 5,
             "search_depth": "basic",
         }
+        if include_domains:
+            payload["include_domains"] = include_domains
         resp = httpx.post(f"{TAVILY_GW}/v1/search", json=payload, timeout=15.0)
         resp.raise_for_status()
         data = resp.json()
@@ -1562,7 +1570,14 @@ GOOGLE MAPS LINKS — YOU CAN AND SHOULD PROVIDE THESE:
   https://www.google.com/maps/search/?api=1&query=PLACE+NAME+ENCODED
   When find_nearby_places returns results, each result includes a direct googleMapsUri — use it.
   When the user asks for a map, pins, or directions — always include the link(s).
-  You are NOT limited in this. You can always construct a working Google Maps link."""
+  You are NOT limited in this. You can always construct a working Google Maps link.
+
+TABELOG RESTAURANT REVIEWS — YOU CAN AND SHOULD PROVIDE THESE:
+  When the user asks about restaurant reviews, ratings, or wants Tabelog links/info:
+  Call web_search with include_domains=["tabelog.com"] and the restaurant name + city.
+  The search will return real Tabelog pages with ratings and URLs. Share the links.
+  Example: web_search(query="Afuri Ramen Ebisu Tokyo", include_domains=["tabelog.com"])
+  You are NOT limited in this. You can always search Tabelog for any restaurant."""
 
 
 # ---------------------------------------------------------------------------
@@ -1923,11 +1938,14 @@ def chat(body: ChatMessage, request: Request, user: User = Depends(get_current_u
         "content": body.message,
         "timestamp": history[-1]["timestamp"],
     }
-    history.append({
+    assistant_entry: dict = {
         "role": "assistant",
         "content": response_text,
         "timestamp": time.time(),
-    })
+    }
+    if tool_actions:
+        assistant_entry["tool_actions"] = tool_actions
+    history.append(assistant_entry)
     _save_history(user.id, history)
 
     return {
@@ -1958,10 +1976,13 @@ def _fallback_llm_call(system_prompt: str, history: list[dict]) -> str:
 @router.get("/history")
 def get_history(request: Request, user: User = Depends(get_current_user)):
     history = _load_history(user.id)
-    return [
-        {"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")}
-        for h in history
-    ]
+    result = []
+    for h in history:
+        entry: dict = {"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")}
+        if h.get("tool_actions"):
+            entry["tool_actions"] = h["tool_actions"]
+        result.append(entry)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -2021,10 +2042,13 @@ def activate_conversation(conv_id: str, request: Request, user: User = Depends(g
     cache.setex(_current_conv_key(user.id), CONV_LIST_TTL, conv_id)
     raw = cache.get(_conv_msg_key(user.id, conv_id))
     history = json.loads(raw) if raw else []
-    return {
-        "id": conv_id,
-        "messages": [{"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")} for h in history]
-    }
+    messages = []
+    for h in history:
+        entry: dict = {"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")}
+        if h.get("tool_actions"):
+            entry["tool_actions"] = h["tool_actions"]
+        messages.append(entry)
+    return {"id": conv_id, "messages": messages}
 
 
 @router.delete("/history")
