@@ -816,7 +816,8 @@ def _exec_web_search(args: dict) -> str:
         # Format results and auto-save to knowledge_items
         lines = []
         saved_count = 0
-        city_val = city.lower() if city else None
+        # Fall back to current trip city so results always save even when AI omits city param
+        city_val = city.lower() if city else _current_city()
 
         for r in results:
             title = r.get("title", "")
@@ -989,12 +990,39 @@ def _exec_find_nearby_places(args: dict) -> str:
                 f"Try increasing the radius or use web_search for broader results."
             )
 
+        # Infer city from anchor label for knowledge_items storage
+        anchor_city_map = {
+            "osaka-airbnb": "osaka", "nara-park": "nara", "usjapan": "osaka",
+            "kanazawa-hotel": "kanazawa", "tokyo-sugamo": "tokyo", "ghibli-museum": "tokyo",
+        }
+        place_city = anchor_city_map.get(location_label, _current_city())
+
+        # Infer category from query keywords (mirrors web_search categorisation)
+        query_lower = query.lower()
+        place_category = "practical"
+        cat_keywords = {
+            "restaurant": ["restaurant", "ramen", "sushi", "food", "eat", "dinner", "lunch",
+                           "breakfast", "cafe", "burger", "tonkatsu", "okonomiyaki", "takoyaki",
+                           "izakaya", "kaiseki", "yakitori", "udon", "soba", "tempura", "curry"],
+            "shopping": ["shop", "shopping", "store", "vintage", "clothing", "souvenir",
+                         "market", "mall", "anime", "manga", "knife", "pottery", "craft",
+                         "electronics", "camera", "sim", "phone"],
+            "temple": ["temple", "shrine", "garden", "park", "castle"],
+            "museum": ["museum", "gallery", "art", "exhibition"],
+            "skincare": ["skincare", "beauty", "cosmetics"],
+        }
+        for cat, keywords in cat_keywords.items():
+            if any(kw in query_lower for kw in keywords):
+                place_category = cat
+                break
+
         walk_min = round(radius_m / 80)  # ~80m/min walking pace
         lines = [
             f"Google Places results for '{query}' near {location_label} "
             f"(within {radius_m}m / ~{walk_min} min walk):\n"
             f"Include the Google Maps link for each place in your response.\n"
         ]
+        saved_count = 0
         for p in places:
             name = (p.get("displayName") or {}).get("text", "Unknown")
             address = p.get("formattedAddress", "No address")
@@ -1006,6 +1034,34 @@ def _exec_find_nearby_places(args: dict) -> str:
             maps_str = f"\n   Google Maps: {maps_uri}" if maps_uri else ""
             lines.append(f"• {name}\n  {address}{rating_str}{maps_str}")
 
+            # Auto-save each place to knowledge_items (dedup on Google Maps URI)
+            try:
+                rating_info = f" | Rating: {rating} ({rating_count} reviews)" if rating else ""
+                summary = f"Address: {address}{rating_info} | Near: {location_label} (within {radius_m}m)"
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        if maps_uri:
+                            cur.execute(
+                                "SELECT 1 FROM knowledge_items WHERE source_url = %s",
+                                (maps_uri,),
+                            )
+                            if cur.fetchone():
+                                continue
+                        cur.execute(
+                            """
+                            INSERT INTO knowledge_items
+                              (city, category, topic, content_summary, source_url)
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (place_city, place_category, name[:200], summary[:500],
+                             maps_uri[:500] if maps_uri else None),
+                        )
+                saved_count += 1
+            except Exception:
+                pass  # Don't fail the search if save fails
+
+        save_note = f"\n\n[{saved_count} places saved to knowledge base]" if saved_count else ""
+        lines.append(save_note)
         return "\n\n".join(lines)
     except httpx.HTTPError as e:
         return f"Places gateway error: {e}. Fall back to web_search for this query."
