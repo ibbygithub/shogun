@@ -8,6 +8,8 @@ services:
         # Browser-reachable URL baked at build time — must be the public Cloudflare hostname.
         # Internal Docker names (shogun-web-api) are NOT resolvable from the user's browser.
         - NEXT_PUBLIC_API_URL=https://api.ibbytech.com
+        # Google Maps JavaScript API key — baked at build time for client-side map rendering.
+        - NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
     container_name: shogun-web-ui
     restart: unless-stopped
     environment:

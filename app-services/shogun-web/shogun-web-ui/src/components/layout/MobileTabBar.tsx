@@ -7,6 +7,7 @@ const TABS = [
   { href: "/dashboard", label: "Home",      icon: "🏠" },
   { href: "/calendar",  label: "Calendar",  icon: "📅" },
   { href: "/planning",  label: "Planning",  icon: "📋" },
+  { href: "/map",       label: "Map",       icon: "🗺️" },
   { href: "/pois",      label: "Places",    icon: "📍" },
   { href: "/phrases",   label: "Phrases",   icon: "🗣️" },
   { href: "/checklist", label: "Checklist", icon: "✅" },
