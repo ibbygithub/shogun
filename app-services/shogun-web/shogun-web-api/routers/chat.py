@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import time
 import uuid
@@ -62,6 +63,27 @@ _ANCHOR_COORDS: dict[str, tuple[float, float]] = {
     "tokyo-sugamo":    (35.7330, 139.7291),  # Sugamo Airbnb, Toshima-ku
     "ghibli-museum":   (35.6963, 139.5705),  # Ghibli Museum, Mitaka
 }
+
+# Human-readable labels for each anchor — used in direction link text
+_ANCHOR_LABELS: dict[str, str] = {
+    "osaka-airbnb":   "Osaka Airbnb (大阪市北区浪花町10-12)",
+    "nara-park":      "Nara Park",
+    "usjapan":        "Universal Studios Japan",
+    "kanazawa-hotel": "Hotel Sanraku, Kanazawa",
+    "tokyo-sugamo":   "Tokyo Airbnb (東京都豊島区巣鴨4-37-6)",
+    "ghibli-museum":  "Ghibli Museum, Mitaka",
+}
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return distance in metres between two lat/lng points."""
+    R = 6_371_000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
 
 # Keywords that trigger a Tavily search for current sakura / event data
 _SAKURA_KEYWORDS = {
@@ -1016,28 +1038,63 @@ def _exec_find_nearby_places(args: dict) -> str:
                 place_category = cat
                 break
 
-        walk_min = round(radius_m / 80)  # ~80m/min walking pace
+        anchor_label = _ANCHOR_LABELS.get(location_label, location_label)
         lines = [
-            f"Google Places results for '{query}' near {location_label} "
-            f"(within {radius_m}m / ~{walk_min} min walk):\n"
-            f"Include the Google Maps link for each place in your response.\n"
+            f"Google Places results for '{query}' near {anchor_label}.\n"
+            f"IMPORTANT: Include ALL pre-built links below exactly as shown. Do NOT construct "
+            f"your own Google Maps URLs — use only the links provided here.\n"
         ]
         saved_count = 0
+        result_count = 0
         for p in places:
             name = (p.get("displayName") or {}).get("text", "Unknown")
             address = p.get("formattedAddress", "No address")
             rating = p.get("rating")
             rating_count = p.get("userRatingCount", 0)
             maps_uri = p.get("googleMapsUri", "")
+            loc = p.get("location") or {}
+            place_lat = loc.get("latitude")
+            place_lng = loc.get("longitude")
+
+            # Calculate real distance and walking time from anchor
+            if place_lat and place_lng:
+                dist_m = round(_haversine_m(lat, lng, place_lat, place_lng))
+                walk_min = max(1, round(dist_m / 80))
+                dist_str = f"{dist_m}m (~{walk_min} min walk)"
+                # Build accurate directions links using real coordinates
+                dir_from_anchor = (
+                    f"https://www.google.com/maps/dir/?api=1"
+                    f"&origin={lat},{lng}"
+                    f"&destination={place_lat},{place_lng}"
+                    f"&travelmode=walking"
+                )
+                dir_from_here = (
+                    f"https://www.google.com/maps/dir/?api=1"
+                    f"&destination={place_lat},{place_lng}"
+                    f"&travelmode=walking"
+                )
+            else:
+                dist_str = f"within {radius_m}m"
+                dir_from_anchor = ""
+                dir_from_here = ""
 
             rating_str = f" | ★{rating} ({rating_count} reviews)" if rating else ""
-            maps_str = f"\n   Google Maps: {maps_uri}" if maps_uri else ""
-            lines.append(f"• {name}\n  {address}{rating_str}{maps_str}")
+
+            entry = f"• **{name}**\n  {address}{rating_str}\n  Distance: {dist_str}"
+            if maps_uri:
+                entry += f"\n  [View on map]({maps_uri})"
+            if dir_from_anchor:
+                entry += f"\n  [Walking directions from {anchor_label}]({dir_from_anchor})"
+            if dir_from_here:
+                entry += f"\n  [Navigate from my current location]({dir_from_here})"
+            lines.append(entry)
+            result_count += 1
 
             # Auto-save each place to knowledge_items (dedup on Google Maps URI)
             try:
                 rating_info = f" | Rating: {rating} ({rating_count} reviews)" if rating else ""
-                summary = f"Address: {address}{rating_info} | Near: {location_label} (within {radius_m}m)"
+                dist_info = f" | Distance: {dist_str}" if place_lat else ""
+                summary = f"Address: {address}{rating_info}{dist_info} | Near: {anchor_label}"
                 with get_conn() as conn:
                     with conn.cursor() as cur:
                         if maps_uri:
@@ -1060,8 +1117,8 @@ def _exec_find_nearby_places(args: dict) -> str:
             except Exception:
                 pass  # Don't fail the search if save fails
 
-        save_note = f"\n\n[{saved_count} places saved to knowledge base]" if saved_count else ""
-        lines.append(save_note)
+        if saved_count:
+            lines.append(f"[{saved_count}/{result_count} places saved to knowledge base]")
         return "\n\n".join(lines)
     except httpx.HTTPError as e:
         return f"Places gateway error: {e}. Fall back to web_search for this query."
@@ -1316,6 +1373,16 @@ def _tool_action_summary(tool_name: str, args: dict, result: str) -> str:
 
     if tool_name == "get_trip_overview":
         return "Read trip overview"
+
+    if tool_name == "find_nearby_places":
+        query = args.get("query", "?")
+        anchor = args.get("anchor") or "current accommodation"
+        radius_m = args.get("radius_m") or 800
+        # Count results in the tool output
+        result_count = result.count("• **") if result else 0
+        saved = result.count("saved to knowledge base") > 0
+        save_str = " — saved to DB" if saved else ""
+        return f"Google Places: '{query}' near {anchor} ({radius_m}m) → {result_count} results{save_str}"
 
     return f"Called tool: {tool_name}"
 
@@ -1627,6 +1694,11 @@ GOOGLE MAPS LINKS — YOU CAN AND SHOULD PROVIDE THESE:
   When find_nearby_places returns results, each result includes a direct googleMapsUri — use it.
   When the user asks for a map, pins, or directions — always include the link(s).
   You are NOT limited in this. You can always construct a working Google Maps link.
+
+10. LINKS AND MAPS — ALWAYS DELIVER IN THE SAME RESPONSE:
+   Never say "I will provide the links" or "give me a moment" — include everything in the
+   current response. If find_nearby_places returns pre-built direction links, copy them
+   exactly as given. Do NOT construct your own Google Maps URLs.
 
 TABELOG RESTAURANT REVIEWS — YOU CAN AND SHOULD PROVIDE THESE:
   When the user asks about restaurant reviews, ratings, or wants Tabelog links/info:
