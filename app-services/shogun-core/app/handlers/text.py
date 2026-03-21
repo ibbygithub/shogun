@@ -58,8 +58,9 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
             "Keep translations natural and note any cultural context where useful."
         )
 
-    # Route through RAG for food/place queries, plain LLM otherwise
-    reply = await rag_respond(text, history, system_prompt)
+    # Route through RAG for food/place queries, plain LLM otherwise.
+    # Pass city so the knowledge DB search can filter by current city.
+    reply = await rag_respond(text, history, system_prompt, city_context=city)
 
     # Persist updated context (user + assistant turn)
     history.append({"role": "user", "content": text})

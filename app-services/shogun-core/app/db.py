@@ -111,3 +111,102 @@ def get_pois_by_city(city: str, category: str | None = None) -> list[dict]:
             return cur.fetchall()
     finally:
         conn.close()
+
+
+# Common navigational/stopwords that don't appear in knowledge content.
+# Shared between search_trip_knowledge and any future caller.
+_KNOWLEDGE_STOPWORDS = {
+    "near", "the", "and", "for", "are", "our", "what", "see", "find",
+    "best", "good", "some", "any", "not", "can", "get", "how", "do",
+    "to", "in", "at", "of", "a", "an", "is", "it", "be", "or", "we",
+    "i", "me", "my", "us", "you", "he", "she", "they", "that", "this",
+    "with", "from", "have", "will", "was", "has", "had", "but", "if",
+    "looking", "want", "need", "going", "try",
+}
+
+
+def search_trip_knowledge(
+    query: str,
+    city: str | None = None,
+    anchor: str | None = None,
+    category: str | None = None,
+) -> list[dict]:
+    """Search knowledge_items using OR-match + count-based relevance ranking.
+
+    Tokens shorter than 3 chars and common stopwords are filtered so words
+    like "near", "the", "see" don't dilute matching. Remaining tokens use OR
+    logic — a row matches if ANY meaningful token appears in topic or
+    content_summary. Results are ordered: full phrase in topic first, then
+    by token match count, then alphabetically.
+
+    Returns list of RealDictRow with keys: city, category, topic, content_summary.
+    Returns empty list when no matches are found.
+    """
+    raw_tokens = query.lower().split()
+    tokens = [t for t in raw_tokens if len(t) >= 3 and t not in _KNOWLEDGE_STOPWORDS]
+    # If all tokens were filtered (very short query), use the raw query as one token
+    if not tokens:
+        tokens = [query.lower()]
+
+    # Structural filters: city (case-insensitive), anchor, category
+    struct_clauses: list[str] = []
+    struct_params: list = []
+    if city:
+        struct_clauses.append("(LOWER(city) = LOWER(%s) OR city IS NULL)")
+        struct_params.append(city)
+    if anchor:
+        struct_clauses.append("anchor = %s")
+        struct_params.append(anchor)
+    if category:
+        struct_clauses.append("LOWER(category) = LOWER(%s)")
+        struct_params.append(category)
+
+    # Text match: OR across all meaningful tokens
+    token_match_parts = []
+    token_params: list = []
+    for token in tokens:
+        like = f"%{token}%"
+        token_match_parts.append("(topic ILIKE %s OR content_summary ILIKE %s)")
+        token_params.extend([like, like])
+    token_clause = "(" + " OR ".join(token_match_parts) + ")"
+
+    all_clauses = struct_clauses + [token_clause]
+    where_sql = "WHERE " + " AND ".join(all_clauses)
+    all_params = struct_params + token_params
+
+    # Relevance score: sum of per-token CASE expressions
+    score_parts = []
+    score_params: list = []
+    for token in tokens:
+        like = f"%{token}%"
+        score_parts.append(
+            "(CASE WHEN topic ILIKE %s OR content_summary ILIKE %s THEN 1 ELSE 0 END)"
+        )
+        score_params.extend([like, like])
+    match_score = " + ".join(score_parts) if score_parts else "1"
+
+    full_like = f"%{query}%"
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT city, category, topic, content_summary
+                FROM knowledge_items
+                {where_sql}
+                ORDER BY
+                    CASE WHEN topic ILIKE %s THEN 0 ELSE 1 END,
+                    ({match_score}) DESC,
+                    city NULLS LAST,
+                    topic
+                LIMIT 15
+                """,
+                all_params + score_params + [full_like],
+            )
+            return cur.fetchall()
+    except Exception:
+        logger.exception("search_trip_knowledge query failed")
+        return []
+    finally:
+        conn.close()

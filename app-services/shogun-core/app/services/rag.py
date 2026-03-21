@@ -1,13 +1,17 @@
 """
-RAG pipeline: Tavily search → LLM synthesis.
+RAG pipeline: knowledge_items DB search → Tavily fallback → LLM synthesis.
 
-Triggered when user asks about restaurants, food, or local places.
-Injects Tabelog/web search results into the LLM context before generating a reply.
-Falls through to plain LLM if Tavily returns nothing or query doesn't warrant search.
+For food/place queries: checks the pre-ingested knowledge_items table first.
+If the DB returns relevant results, injects them as context. Only calls Tavily
+if the DB returns nothing — saving API cost and latency.
+
+For event/sakura queries: Tavily directly (no knowledge base for live events).
+Falls through to plain LLM if all sources return nothing.
 """
 import logging
 from app.services import tavily as tavily_svc
 from app.services.llm import chat
+from app import db as _db
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +93,36 @@ async def respond(
         messages = history + [{"role": "user", "content": augmented}]
         return await chat(messages, system_prompt, max_tokens=max_tokens)
 
-    # Food/restaurant query — use Tabelog domain restriction
+    # Food/place query — check knowledge_items DB first, Tavily as fallback
+    logger.info("RAG: food/place query — searching knowledge DB first: %r", user_query[:80])
+    try:
+        kb_rows = _db.search_trip_knowledge(user_query, city=city_context)
+    except Exception as _exc:
+        logger.warning("RAG: knowledge DB search failed: %s", _exc)
+        kb_rows = []
+
+    if kb_rows:
+        logger.info("RAG: knowledge DB returned %d result(s) — skipping Tavily", len(kb_rows))
+        context_lines = []
+        for row in kb_rows:
+            city_label = (row["city"] or "").title() or "General"
+            cat = row["category"] or ""
+            topic = row["topic"] or ""
+            summary = row["content_summary"] or ""
+            context_lines.append(f"- [{city_label} / {cat}] {topic}: {summary}")
+        context_block = "\n".join(context_lines)
+        augmented = (
+            f"{user_query}\n\n"
+            f"[Knowledge base — pre-researched trip intelligence:]\n{context_block}\n\n"
+            f"Use these results to give specific, accurate recommendations. "
+            f"Cite notable details and note the area/district where visible."
+        )
+        messages = history + [{"role": "user", "content": augmented}]
+        return await chat(messages, system_prompt, max_tokens=max_tokens)
+
+    # Knowledge base empty — fall back to Tavily with Tabelog domain restriction
     search_q = f"{user_query} Japan" if not city_context else f"{user_query} {city_context} Japan"
-    logger.info("RAG: food/place query — searching Tavily (Tabelog): %r", search_q[:80])
+    logger.info("RAG: knowledge DB empty — searching Tavily (Tabelog): %r", search_q[:80])
 
     snippets = await tavily_svc.search(search_q, domains=_TABELOG_DOMAINS, max_results=4)
 
@@ -105,7 +136,7 @@ async def respond(
         f"{user_query}\n\n"
         f"[Web search results — Tabelog/local sources:]\n{context_block}\n\n"
         f"Use these search results to give specific, accurate recommendations. "
-        f"Cite notable details (ratings, prices, signatures dishes) where visible."
+        f"Cite notable details (ratings, prices, signature dishes) where visible."
     )
 
     messages = history + [{"role": "user", "content": augmented}]

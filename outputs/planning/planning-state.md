@@ -146,6 +146,21 @@ City match in search_trip_knowledge uses `=` (case-sensitive) — all Brenda ite
 
 ---
 
+## Telegram Upgrade — Approved Plan (2026-03-20)
+
+Plan: `outputs/planning/telegram-upgrade-plan.md`
+
+Priority order (3 days to departure):
+1. **Phase 0** — `search_trip_knowledge` DB-first in rag.py (2h) — MUST HAVE
+2. **Phase 1** — Gemini function calling in text.py, 5 read tools (4-6h) — MUST HAVE
+3. **Phase 3a** — Location trigger → find_nearby_places (2h) — HIGH VALUE
+4. **Phase 3b/c** — New commands (/pois, /checklist, /brief) + brief upgrade (2h) — HIGH VALUE
+5. **Phase 2** — Mutation tools (3h) — can deploy from Japan if needed
+
+Key constraint: 25s LLM gateway timeout. Single tool call per turn, 10s cap on tool executor.
+
+---
+
 ## Active Work — Pre-Trip (Departure Mar 23, 4 days)
 
 | Item | Description | Phase | Status | Last Updated |
@@ -407,6 +422,7 @@ Checklist items: 15 packing items seeded
 
 | Document | Path | Status |
 |----------|------|--------|
+| Telegram Upgrade Plan | outputs/planning/telegram-upgrade-plan.md | Approved 2026-03-20 |
 | Knowledge Pipeline Plan | outputs/planning/knowledge-pipeline-plan.md | Approved 2026-03-20 |
 | Skill System Plan | outputs/planning/skill-system-plan.md | Approved — Day 1 complete |
 | Migration Guide | outputs/planning/migration-guide.md | Complete |
