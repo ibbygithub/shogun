@@ -305,6 +305,7 @@ def _exec_find_nearby_places(args: dict) -> str:
 
     walk_limit = radius_m // 80
     lines = [f"{query.title()} near {location_label} (~{walk_limit} min walk radius):"]
+    dir_links: list[str] = []
     for i, (_, p, dist_m) in enumerate(places_with_dist, 1):
         name = (p.get("displayName") or {}).get("text", "Unknown")
         address = p.get("formattedAddress", "")
@@ -320,8 +321,8 @@ def _exec_find_nearby_places(args: dict) -> str:
         addr_str = f"\n   {address}" if address else ""
         maps_str = f"\n   Maps: {maps_uri}" if maps_uri else ""
 
-        # Walking directions from the anchor — lets Gemini share the link on follow-up
-        dir_str = ""
+        lines.append(f"\n{i}. {name}{rating_str}\n   {dist_str}{addr_str}{maps_str}")
+
         if plat and plng:
             dir_url = (
                 f"https://www.google.com/maps/dir/?api=1"
@@ -329,14 +330,21 @@ def _exec_find_nearby_places(args: dict) -> str:
                 f"&destination={plat},{plng}"
                 f"&travelmode=walking"
             )
-            dir_str = f"\n   Walk from {location_label}: {dir_url}"
+            walk_min = max(1, round(dist_m / 80)) if dist_m is not None else "?"
+            dir_links.append(f"• {name} (~{walk_min} min walk): {dir_url}")
 
-        lines.append(f"\n{i}. {name}{rating_str}\n   {dist_str}{addr_str}{maps_str}{dir_str}")
+    result = "\n".join(lines)
 
-    lines.append(
-        "\n[Include the walking direction URLs above verbatim in your reply so the user can tap to navigate.]"
-    )
-    return "\n".join(lines)
+    # Append direction links in a delimited block so chat_with_tools can
+    # pass them through to the user verbatim without Gemini dropping them.
+    if dir_links:
+        result += (
+            "\n\n##DIRECTIONS_START##\n"
+            "**Walking directions from " + location_label + ":**\n"
+            + "\n".join(dir_links)
+            + "\n##DIRECTIONS_END##"
+        )
+    return result
 
 
 def _exec_web_search(args: dict) -> str:
@@ -594,25 +602,30 @@ async def chat_with_tools(
         logger.warning("tools: %r raised %s", tool_name, exc)
         tool_result = f"Tool error ({tool_name}): {exc}. Answer from your Japan expertise instead."
 
+    # ── Strip verbatim blocks before passing to Gemini ───────────────────────
+    # find_nearby_places embeds a ##DIRECTIONS_START## block that must be
+    # appended to the final reply verbatim — Gemini reliably drops URLs.
+    _DS = "##DIRECTIONS_START##"
+    _DE = "##DIRECTIONS_END##"
+    verbatim_block: str = ""
+    gemini_tool_result = tool_result
+    if _DS in tool_result and _DE in tool_result:
+        ds = tool_result.index(_DS)
+        de = tool_result.index(_DE)
+        verbatim_block = tool_result[ds + len(_DS):de].strip()
+        gemini_tool_result = tool_result[:ds].strip()
+
     # ── Round 2: synthesise final response from tool result ───────────────────
     contents_r2 = contents + [
         {"role": "model", "parts": [{"functionCall": {"name": tool_name, "args": tool_args}}]},
-        {"role": "user",  "parts": [{"functionResponse": {"name": tool_name, "response": {"result": tool_result}}}]},
+        {"role": "user",  "parts": [{"functionResponse": {"name": tool_name, "response": {"result": gemini_tool_result}}}]},
     ]
-    # Append a URL pass-through instruction so Gemini doesn't silently drop links
-    system_prompt_r2 = system_prompt
-    if system_prompt_r2:
-        system_prompt_r2 += (
-            "\n\nWhen tool results contain URLs (maps.google.com, etc.), "
-            "always include them verbatim in your reply so the user can tap to navigate."
-        )
-
     payload2: dict = {
         "contents": contents_r2,
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 800},
     }
-    if system_prompt_r2:
-        payload2["systemInstruction"] = {"parts": [{"text": system_prompt_r2}]}
+    if system_prompt:
+        payload2["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
     try:
         async with httpx.AsyncClient(timeout=GEMINI_TIMEOUT) as client:
@@ -621,6 +634,12 @@ async def chat_with_tools(
             reply = _extract_text(resp2.json())
     except Exception as exc:
         logger.warning("tools: Gemini call 2 failed (%s) — returning raw tool result", exc)
-        reply = tool_result
+        reply = gemini_tool_result
 
-    return _truncate(reply or tool_result)
+    final = _truncate(reply or gemini_tool_result)
+
+    # Append direction links verbatim after Gemini's synthesised text
+    if verbatim_block:
+        final = final.rstrip() + "\n\n" + verbatim_block
+
+    return final
