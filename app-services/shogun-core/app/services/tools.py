@@ -585,6 +585,71 @@ def _truncate(text: str, limit: int = RESPONSE_LIMIT) -> str:
 # Main entry point — called from text.py
 # ---------------------------------------------------------------------------
 
+async def forced_research(
+    query: str,
+    system_prompt: str,
+    city_context: str | None = None,
+) -> str:
+    """
+    /research command handler — always executes both DB and web search.
+    Never lets the LLM decide whether to search; that's the whole point of /research.
+    Synthesises results into a final response via a single Gemini call.
+    """
+    parts: list[str] = []
+
+    # 1. Knowledge base search
+    kb_results = _exec_search_trip_knowledge({"query": query, "city": city_context})
+    if kb_results and not kb_results.startswith("No knowledge items"):
+        parts.append(f"From the trip knowledge base:\n{kb_results}")
+
+    # 2. Web search (always runs, regardless of KB results)
+    try:
+        web_results = await asyncio.wait_for(
+            asyncio.to_thread(_exec_web_search, {"query": query, "city": city_context or ""}),
+            timeout=TOOL_TIMEOUT,
+        )
+        if web_results and not web_results.startswith("No web results"):
+            parts.append(f"From the web:\n{web_results}")
+    except asyncio.TimeoutError:
+        logger.warning("forced_research: web_search timed out")
+    except Exception as exc:
+        logger.warning("forced_research: web_search error: %s", exc)
+
+    if not parts:
+        context = f"No search results found for: {query}"
+    else:
+        context = "\n\n---\n\n".join(parts)
+
+    if not settings.google_api_key:
+        return _truncate(context)
+
+    synthesis_prompt = (
+        f"The user asked (via /research command): {query}\n\n"
+        f"Here are the search results:\n\n{context}\n\n"
+        "Synthesise a concise, helpful answer based on these results. "
+        "Be specific. If the results are about Japan travel, give practical details. "
+        "Do not say you cannot access the internet — these results were just fetched."
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=GEMINI_TIMEOUT) as client:
+            resp = await client.post(
+                _gemini_url(),
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": synthesis_prompt}]}],
+                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 800},
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
+                },
+            )
+            resp.raise_for_status()
+            reply = _extract_text(resp.json())
+    except Exception as exc:
+        logger.warning("forced_research: synthesis call failed (%s) — returning raw results", exc)
+        reply = context
+
+    return _truncate(reply or context)
+
+
 async def chat_with_tools(
     user_message: str,
     history: list[dict],

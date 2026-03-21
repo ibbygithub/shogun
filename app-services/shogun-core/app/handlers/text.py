@@ -8,7 +8,7 @@ import re
 from app.models import TelegramEnvelope
 from app.commands.system import handle_command, handle_async_command
 from app.services.llm import chat, build_system_prompt
-from app.services.tools import chat_with_tools
+from app.services.tools import chat_with_tools, forced_research
 from app.services.weather import get_weather_for_city
 from app.services.sender import send_photo
 from app.valkey_client import get_context, save_context, get_translate_mode
@@ -67,13 +67,13 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
             "Keep translations natural and note any cultural context where useful."
         )
 
-    # /research [query] — explicit context-free knowledge + web search
+    # /research [query] — always searches, never answers from memory
     if text.lower().startswith("/research"):
         query = text[9:].strip()
         if not query:
             return "Usage: /research [query]\nExample: /research craft beer near osaka airbnb"
-        # Run with empty history so conversation context doesn't interfere
-        reply = await chat_with_tools(query, [], system_prompt, city_context=city)
+        # forced_research bypasses LLM routing and always calls both DB and web search
+        reply = await forced_research(query, system_prompt, city_context=city)
         # Persist just this exchange
         history.append({"role": "user", "content": text})
         history.append({"role": "assistant", "content": reply})
