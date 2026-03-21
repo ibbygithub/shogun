@@ -14,6 +14,7 @@ from app.services.sender import send_photo
 from app.valkey_client import get_context, save_context, get_translate_mode
 
 _IMAGE_URL_RE = re.compile(r"##IMAGE_URL:(https?://\S+)##\n?")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]")
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,12 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
             "For any Japanese text they send: translate to English. "
             "For any English text they send: translate to Japanese and show both. "
             "Keep translations natural and note any cultural context where useful."
+        )
+    elif _CJK_RE.search(text):
+        # Auto-detect Japanese/CJK even when translate mode is off
+        system_prompt += (
+            "\n\nThe user has sent Japanese text. "
+            "Translate it to English and provide helpful context if relevant."
         )
 
     # /research [query] — always searches, never answers from memory

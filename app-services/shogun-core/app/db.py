@@ -127,6 +127,37 @@ def get_checklist() -> list[dict]:
         conn.close()
 
 
+def get_unpacked_items() -> list[dict]:
+    """Return checklist items that have not yet been packed."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT category, item_name, notes "
+                "FROM checklist_items WHERE packed = FALSE "
+                "ORDER BY category, item_name"
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def get_knowledge_tip_for_city(city: str) -> list[dict]:
+    """Return up to 2 random knowledge_items for a city, used in the morning brief."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT topic, content_summary, category "
+                "FROM knowledge_items WHERE LOWER(city) = LOWER(%s) "
+                "ORDER BY RANDOM() LIMIT 2",
+                (city,)
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
 # Common navigational/stopwords that don't appear in knowledge content.
 # Shared between search_trip_knowledge and any future caller.
 _KNOWLEDGE_STOPWORDS = {

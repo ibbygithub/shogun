@@ -585,6 +585,105 @@ def _truncate(text: str, limit: int = RESPONSE_LIMIT) -> str:
 # Main entry point — called from text.py
 # ---------------------------------------------------------------------------
 
+async def location_triggered_places(
+    lat: float,
+    lng: float,
+    system_prompt: str,
+    history: list[dict],
+) -> str:
+    """
+    Called from location.py when the 150m/5min trigger fires.
+    Searches Google Places around the user's actual GPS coordinates and
+    synthesises a brief 2-3 sentence recommendation via Gemini.
+    Falls back to a generic Gemini tip if Places returns nothing.
+    """
+    def _search_nearby() -> list[str]:
+        resp = httpx.post(
+            f"{settings.places_gateway_url}/v1/places/search_text",
+            json={
+                "text_query": "restaurant cafe shop convenience store sights Japan",
+                "lat": lat,
+                "lng": lng,
+                "radius_m": 400,
+                "max_results": 5,
+                "language_code": "en",
+                "region_code": "JP",
+            },
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        raw = (data.get("data") or {}).get("places") or []
+        if not raw:
+            return []
+        # Sort by distance
+        with_dist = []
+        for p in raw:
+            loc = p.get("location") or {}
+            plat = loc.get("latitude")
+            plng = loc.get("longitude")
+            dist_m = round(_haversine_m(lat, lng, plat, plng)) if plat and plng else None
+            with_dist.append((dist_m or 9_999_999, p, dist_m))
+        with_dist.sort(key=lambda x: x[0])
+        lines = []
+        for _, p, dist_m in with_dist[:4]:
+            name = (p.get("displayName") or {}).get("text", "Unknown")
+            rating = p.get("rating")
+            dist_str = f" {dist_m}m" if dist_m else ""
+            rating_str = f" ★{rating}" if rating else ""
+            lines.append(f"• {name}{rating_str}{dist_str}")
+        return lines
+
+    # Run Places search in thread
+    places_lines: list[str] = []
+    try:
+        places_lines = await asyncio.wait_for(
+            asyncio.to_thread(_search_nearby),
+            timeout=TOOL_TIMEOUT,
+        )
+    except Exception as exc:
+        logger.warning("location_triggered_places: places search error: %s", exc)
+
+    if places_lines:
+        places_text = "\n".join(places_lines)
+        prompt = (
+            f"The user just moved to GPS {lat:.5f}, {lng:.5f} in Japan. "
+            f"Nearby places found:\n{places_text}\n\n"
+            "Give a brief, practical tip about what's worth stopping for nearby — "
+            "2-3 sentences. They're on the move."
+        )
+    else:
+        prompt = (
+            f"The user just moved to GPS {lat:.5f}, {lng:.5f} in Japan. "
+            "Give a brief, practical tip about what's worth stopping for in this area — "
+            "food, sights, shops, or practical info. 2-3 sentences. They're on the move."
+        )
+
+    if not settings.google_api_key:
+        return f"You're at {lat:.4f}, {lng:.4f}."
+
+    contents = _history_to_contents(history)
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+
+    try:
+        async with httpx.AsyncClient(timeout=GEMINI_TIMEOUT) as client:
+            resp = await client.post(
+                _gemini_url(),
+                json={
+                    "contents": contents,
+                    "generationConfig": {"temperature": 0.3, "maxOutputTokens": 200},
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
+                },
+            )
+            resp.raise_for_status()
+            reply = _extract_text(resp.json())
+    except Exception as exc:
+        logger.warning("location_triggered_places: Gemini synthesis failed: %s", exc)
+        reply = "\n".join(places_lines) if places_lines else ""
+
+    return _truncate(reply or f"You're near {lat:.4f}, {lng:.4f}.", limit=400)
+
+
 async def forced_research(
     query: str,
     system_prompt: str,

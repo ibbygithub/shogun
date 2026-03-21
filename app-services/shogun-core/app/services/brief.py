@@ -138,6 +138,28 @@ async def _build_brief(today_jst: date) -> str:
         except Exception as exc:
             logger.warning("Brief weather error: %s", exc)
 
+    # Checklist reminder — pre-trip only; once in Japan, packing is done
+    if today_jst < TRIP_START:
+        try:
+            unpacked = db.get_unpacked_items()
+            if unpacked:
+                names = ", ".join(item["item_name"] for item in unpacked[:5])
+                more = f" (+{len(unpacked) - 5} more)" if len(unpacked) > 5 else ""
+                lines.append(f"\n🎒 *Still unpacked:* {names}{more}")
+        except Exception as exc:
+            logger.warning("Brief checklist error: %s", exc)
+
+    # Knowledge tip — one random tip about today's city, shown during the trip
+    if city and today_jst >= TRIP_START:
+        try:
+            tips = db.get_knowledge_tip_for_city(city)
+            if tips:
+                tip = tips[0]
+                summary = (tip["content_summary"] or "")[:200]
+                lines.append(f"\n💡 *{city.capitalize()} tip:* {tip['topic']} — {summary}")
+        except Exception as exc:
+            logger.warning("Brief knowledge tip error: %s", exc)
+
     # Closing
     lines.append("\n💬 _Ask me anything about today's plans!_")
 

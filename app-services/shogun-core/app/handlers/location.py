@@ -7,7 +7,8 @@ import logging
 import math
 import time
 from app.models import TelegramEnvelope
-from app.services.llm import chat, build_system_prompt
+from app.services.llm import build_system_prompt
+from app.services.tools import location_triggered_places
 from app.valkey_client import get_context, save_context, get_location, save_location
 
 logger = logging.getLogger(__name__)
@@ -80,16 +81,8 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
     history = get_context(telegram_user_id)
     system_prompt = build_system_prompt(user, prefs)
 
-    location_prompt = (
-        f"The user has just moved to coordinates {lat:.5f}, {lng:.5f} in Japan. "
-        f"Give a brief, practical tip: what's worth stopping for nearby? "
-        f"Consider food, sights, shops, or practical info for where they are. "
-        f"Keep it to 2-3 sentences — they're on the move."
-    )
-
-    # Snapshot history for the LLM call — don't want the location ping in the permanent history
-    history_snapshot = list(history) + [{"role": "user", "content": location_prompt}]
-    reply = await chat(history_snapshot, system_prompt, max_tokens=200)
+    # Call Places API with actual GPS coordinates, then synthesise via Gemini
+    reply = await location_triggered_places(lat, lng, system_prompt, history)
 
     # Store the exchange so follow-up questions ("tell me more") work naturally
     history.append({"role": "user", "content": f"[Location update: {lat:.5f}, {lng:.5f}]"})
