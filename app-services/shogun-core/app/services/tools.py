@@ -293,7 +293,9 @@ def _exec_find_nearby_places(args: dict) -> str:
     if not raw_places:
         return f"No places found for '{query}' within {radius_m}m of {location_label}."
 
-    # Sort by distance
+    # Sort by distance, then hard-filter to requested radius.
+    # Places API treats radius as a soft locationBias hint — results outside the
+    # radius are valid API responses but not useful for "walking distance" queries.
     places_with_dist = []
     for p in raw_places:
         loc = p.get("location") or {}
@@ -302,6 +304,10 @@ def _exec_find_nearby_places(args: dict) -> str:
         dist_m = round(_haversine_m(lat, lng, plat, plng)) if plat and plng else None
         places_with_dist.append((dist_m if dist_m is not None else 9_999_999, p, dist_m))
     places_with_dist.sort(key=lambda x: x[0])
+
+    in_radius = [(s, p, d) for s, p, d in places_with_dist if d is not None and d <= radius_m]
+    # Keep results within radius; if none qualify, keep the 3 nearest regardless
+    places_with_dist = in_radius if in_radius else places_with_dist[:3]
 
     walk_limit = radius_m // 80
     lines = [f"{query.title()} near {location_label} (~{walk_limit} min walk radius):"]
@@ -638,8 +644,8 @@ async def chat_with_tools(
 
     final = _truncate(reply or gemini_tool_result)
 
-    # Append direction links verbatim after Gemini's synthesised text
-    if verbatim_block:
+    # Append direction links verbatim only if Gemini didn't already include them
+    if verbatim_block and "maps.google.com/dir" not in final:
         final = final.rstrip() + "\n\n" + verbatim_block
 
     return final
