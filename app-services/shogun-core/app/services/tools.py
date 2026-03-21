@@ -183,6 +183,24 @@ TELEGRAM_TOOLS = [
         },
     },
     {
+        "name": "image_search",
+        "description": (
+            "Search for a photo or image of a specific place, landmark, food, mascot, or attraction. "
+            "Use when the user explicitly asks to 'see', 'show', 'send a picture', 'what does X look like', "
+            "or asks for a photo/image of something."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to find a photo of (e.g. 'Kuidaore Taro mascot Osaka', 'Kinkakuji temple Kyoto')",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "get_trip_pois",
         "description": "Get points of interest for the trip, optionally filtered by city or category.",
         "parameters": {
@@ -222,7 +240,7 @@ TELEGRAM_TOOLS = [
 ]
 
 # Tools that make remote HTTP calls — must run via asyncio.to_thread
-_REMOTE_TOOLS = {"find_nearby_places", "web_search"}
+_REMOTE_TOOLS = {"find_nearby_places", "web_search", "image_search"}
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +411,45 @@ def _exec_web_search(args: dict) -> str:
     return "\n\n".join(lines)
 
 
+def _exec_image_search(args: dict) -> str:
+    """Sync — called via asyncio.to_thread. Returns ##IMAGE_URL:...## if found."""
+    query = (args.get("query") or "").strip()
+    if not query:
+        return "Error: query is required."
+
+    resp = httpx.post(
+        f"{settings.tavily_gateway_url}/v1/search",
+        json={"query": query, "max_results": 3, "search_depth": "basic", "include_images": True},
+        timeout=15.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    images: list = data.get("images") or []
+    # Filter to HTTPS image URLs ending in common image extensions
+    valid_images = [
+        url for url in images
+        if isinstance(url, str)
+        and url.startswith("https://")
+        and any(url.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"))
+    ]
+
+    # Build a short description from search results for use as caption
+    results = data.get("results") or []
+    snippets = []
+    for r in results[:2]:
+        content = r.get("content", "")
+        if content:
+            snippets.append(content[:200])
+    description = " ".join(snippets)[:400] if snippets else f"Photo of {query}"
+
+    if valid_images:
+        return f"##IMAGE_URL:{valid_images[0]}##\n{description}"
+
+    # No image found — return description so Gemini can answer in text
+    return f"No image found for '{query}'. {description}"
+
+
 def _exec_get_trip_pois(args: dict) -> str:
     city = args.get("city")
     category = args.get("category")
@@ -466,6 +523,7 @@ _EXECUTORS = {
     "search_trip_knowledge": _exec_search_trip_knowledge,
     "find_nearby_places":    _exec_find_nearby_places,
     "web_search":            _exec_web_search,
+    "image_search":          _exec_image_search,
     "get_trip_pois":         _exec_get_trip_pois,
     "get_itinerary":         _exec_get_itinerary,
 }
@@ -609,17 +667,28 @@ async def chat_with_tools(
         tool_result = f"Tool error ({tool_name}): {exc}. Answer from your Japan expertise instead."
 
     # ── Strip verbatim blocks before passing to Gemini ───────────────────────
-    # find_nearby_places embeds a ##DIRECTIONS_START## block that must be
-    # appended to the final reply verbatim — Gemini reliably drops URLs.
+    # find_nearby_places embeds ##DIRECTIONS_START##/##DIRECTIONS_END## blocks.
+    # image_search embeds ##IMAGE_URL:https://...## markers.
+    # Both must bypass Gemini synthesis — it reliably drops URLs.
     _DS = "##DIRECTIONS_START##"
     _DE = "##DIRECTIONS_END##"
     verbatim_block: str = ""
+    image_url: str = ""
     gemini_tool_result = tool_result
-    if _DS in tool_result and _DE in tool_result:
-        ds = tool_result.index(_DS)
-        de = tool_result.index(_DE)
-        verbatim_block = tool_result[ds + len(_DS):de].strip()
-        gemini_tool_result = tool_result[:ds].strip()
+
+    # Extract ##IMAGE_URL:...## marker
+    import re as _re
+    _img_match = _re.search(r"##IMAGE_URL:(https?://\S+)##", tool_result)
+    if _img_match:
+        image_url = _img_match.group(1)
+        gemini_tool_result = _re.sub(r"##IMAGE_URL:https?://\S+##\n?", "", gemini_tool_result).strip()
+
+    # Extract ##DIRECTIONS_START##...##DIRECTIONS_END## block
+    if _DS in gemini_tool_result and _DE in gemini_tool_result:
+        ds = gemini_tool_result.index(_DS)
+        de = gemini_tool_result.index(_DE)
+        verbatim_block = gemini_tool_result[ds + len(_DS):de].strip()
+        gemini_tool_result = gemini_tool_result[:ds].strip()
 
     # ── Round 2: synthesise final response from tool result ───────────────────
     contents_r2 = contents + [
@@ -647,5 +716,9 @@ async def chat_with_tools(
     # Append direction links verbatim only if Gemini didn't already include them
     if verbatim_block and "maps.google.com/dir" not in final:
         final = final.rstrip() + "\n\n" + verbatim_block
+
+    # If an image was found, tag it onto the reply for text.py to extract and send
+    if image_url:
+        final = f"##IMAGE_URL:{image_url}##\n{final}"
 
     return final

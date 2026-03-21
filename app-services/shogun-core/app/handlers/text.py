@@ -4,12 +4,16 @@ Checks for system commands first, then routes to LLM (with RAG for food/place qu
 Translate mode: when active, appends translation instruction to the system prompt.
 """
 import logging
+import re
 from app.models import TelegramEnvelope
 from app.commands.system import handle_command, handle_async_command
 from app.services.llm import chat, build_system_prompt
 from app.services.tools import chat_with_tools
 from app.services.weather import get_weather_for_city
+from app.services.sender import send_photo
 from app.valkey_client import get_context, save_context, get_translate_mode
+
+_IMAGE_URL_RE = re.compile(r"##IMAGE_URL:(https?://\S+)##\n?")
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +84,15 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
 
     # Route through Gemini function calling. Falls back to RAG on any error.
     reply = await chat_with_tools(text, history, system_prompt, city_context=city)
+
+    # If an image was found, send it as a Telegram photo and use remaining text as caption
+    img_match = _IMAGE_URL_RE.search(reply)
+    if img_match:
+        image_url = img_match.group(1)
+        caption = _IMAGE_URL_RE.sub("", reply).strip()
+        await send_photo(envelope.chat.id, image_url, caption)
+        # Replace reply with just the caption for context persistence
+        reply = caption if caption else "Here's a photo!"
 
     # Persist updated context (user + assistant turn)
     history.append({"role": "user", "content": text})
