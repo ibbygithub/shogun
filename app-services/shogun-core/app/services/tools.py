@@ -311,13 +311,27 @@ def _exec_find_nearby_places(args: dict) -> str:
         rating = p.get("rating")
         rating_count = p.get("userRatingCount", 0)
         maps_uri = p.get("googleMapsUri", "")
+        loc = p.get("location") or {}
+        plat = loc.get("latitude")
+        plng = loc.get("longitude")
 
         dist_str = f"{dist_m}m (~{max(1, round(dist_m / 80))} min walk)" if dist_m is not None else "distance unknown"
         rating_str = f" ★{rating} ({rating_count} reviews)" if rating else ""
         addr_str = f"\n   {address}" if address else ""
-        maps_str = f"\n   {maps_uri}" if maps_uri else ""
+        maps_str = f"\n   Maps: {maps_uri}" if maps_uri else ""
 
-        lines.append(f"\n{i}. {name}{rating_str}\n   {dist_str}{addr_str}{maps_str}")
+        # Walking directions from the anchor — lets Gemini share the link on follow-up
+        dir_str = ""
+        if plat and plng:
+            dir_url = (
+                f"https://www.google.com/maps/dir/?api=1"
+                f"&origin={lat},{lng}"
+                f"&destination={plat},{plng}"
+                f"&travelmode=walking"
+            )
+            dir_str = f"\n   Walk from {location_label}: {dir_url}"
+
+        lines.append(f"\n{i}. {name}{rating_str}\n   {dist_str}{addr_str}{maps_str}{dir_str}")
 
     return "\n".join(lines)
 
