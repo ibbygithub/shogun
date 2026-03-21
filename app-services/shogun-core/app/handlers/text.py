@@ -7,7 +7,7 @@ import logging
 from app.models import TelegramEnvelope
 from app.commands.system import handle_command
 from app.services.llm import chat, build_system_prompt
-from app.services.rag import respond as rag_respond
+from app.services.tools import chat_with_tools
 from app.services.weather import get_weather_for_city
 from app.valkey_client import get_context, save_context, get_translate_mode
 
@@ -58,9 +58,8 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
             "Keep translations natural and note any cultural context where useful."
         )
 
-    # Route through RAG for food/place queries, plain LLM otherwise.
-    # Pass city so the knowledge DB search can filter by current city.
-    reply = await rag_respond(text, history, system_prompt, city_context=city)
+    # Route through Gemini function calling. Falls back to RAG on any error.
+    reply = await chat_with_tools(text, history, system_prompt, city_context=city)
 
     # Persist updated context (user + assistant turn)
     history.append({"role": "user", "content": text})
