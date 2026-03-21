@@ -85,14 +85,21 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
     # Route through Gemini function calling. Falls back to RAG on any error.
     reply = await chat_with_tools(text, history, system_prompt, city_context=city)
 
-    # If an image was found, send it as a Telegram photo and use remaining text as caption
+    # If an image was found, send it as a Telegram photo with the caption embedded.
+    # Return None so main.py sends {} — the gateway stays silent (no second text message).
     img_match = _IMAGE_URL_RE.search(reply)
     if img_match:
         image_url = img_match.group(1)
         caption = _IMAGE_URL_RE.sub("", reply).strip()
         await send_photo(envelope.chat.id, image_url, caption)
-        # Replace reply with just the caption for context persistence
-        reply = caption if caption else "Here's a photo!"
+        # Persist a clean version of the exchange without the URL marker
+        clean_reply = caption if caption else "Here's a photo!"
+        history.append({"role": "user", "content": text})
+        history.append({"role": "assistant", "content": clean_reply})
+        if len(history) > 20:
+            history = history[-20:]
+        save_context(telegram_user_id, history)
+        return None  # photo already sent with caption — gateway must not send a second message
 
     # Persist updated context (user + assistant turn)
     history.append({"role": "user", "content": text})
