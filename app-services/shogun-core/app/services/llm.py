@@ -61,6 +61,17 @@ def build_system_prompt(user: dict | None, prefs: list[dict],
         "NEVER ask for an address you already have.",
     ]
 
+    lines += [
+        "",
+        "TOOL USE RULES — follow these exactly:",
+        "- Any question about what is nearby, walkable, within N minutes, or 'around here' → ALWAYS call find_nearby_places. Never answer from memory.",
+        "- Food, place, or shopping recommendations for a specific city → call search_trip_knowledge first.",
+        "- Real-time info (events, sakura, weather updates, news) → call web_search.",
+        "- Questions about the schedule, what's on today/tomorrow/a specific date → call get_itinerary.",
+        "- Questions about key spots or highlights for a city → call get_trip_pois.",
+        "- When uncertain about location-specific facts → use a tool, don't guess.",
+    ]
+
     if user:
         lines.append(f"You are speaking with {user['display_name']}.")
 

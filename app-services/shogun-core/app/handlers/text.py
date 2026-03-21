@@ -5,7 +5,7 @@ Translate mode: when active, appends translation instruction to the system promp
 """
 import logging
 from app.models import TelegramEnvelope
-from app.commands.system import handle_command
+from app.commands.system import handle_command, handle_async_command
 from app.services.llm import chat, build_system_prompt
 from app.services.tools import chat_with_tools
 from app.services.weather import get_weather_for_city
@@ -24,6 +24,10 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
         reply = handle_command(text, user)
         if reply:
             return reply
+        # Async commands (/brief) and /research are handled below
+        async_reply = await handle_async_command(text, user)
+        if async_reply is not None:
+            return async_reply
 
     # Unknown users get a polite rejection
     if not user:
@@ -36,6 +40,7 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
     # Pre-fetch weather asynchronously so build_system_prompt can inject it
     # City is derived from the itinerary; fall back gracefully if unavailable
     weather_str: str | None = None
+    city: str | None = None
     try:
         from datetime import datetime, timezone, timedelta
         from app import db
@@ -57,6 +62,21 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
             "For any English text they send: translate to Japanese and show both. "
             "Keep translations natural and note any cultural context where useful."
         )
+
+    # /research [query] — explicit context-free knowledge + web search
+    if text.lower().startswith("/research"):
+        query = text[9:].strip()
+        if not query:
+            return "Usage: /research [query]\nExample: /research craft beer near osaka airbnb"
+        # Run with empty history so conversation context doesn't interfere
+        reply = await chat_with_tools(query, [], system_prompt, city_context=city)
+        # Persist just this exchange
+        history.append({"role": "user", "content": text})
+        history.append({"role": "assistant", "content": reply})
+        if len(history) > 20:
+            history = history[-20:]
+        save_context(telegram_user_id, history)
+        return reply
 
     # Route through Gemini function calling. Falls back to RAG on any error.
     reply = await chat_with_tools(text, history, system_prompt, city_context=city)

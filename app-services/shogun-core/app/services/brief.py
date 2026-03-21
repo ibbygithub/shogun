@@ -26,6 +26,12 @@ CITY_EMOJI = {
     "los angeles": "✈️",
 }
 
+async def build_brief_text() -> str:
+    """Build the morning brief text for today. Used by /brief command."""
+    today_jst = datetime.now(JST).date()
+    return await _build_brief(today_jst)
+
+
 async def send_morning_brief():
     """Send morning brief to all users with notification_active=True."""
     today_jst = datetime.now(JST).date()

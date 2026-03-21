@@ -113,6 +113,20 @@ def get_pois_by_city(city: str, category: str | None = None) -> list[dict]:
         conn.close()
 
 
+def get_checklist() -> list[dict]:
+    """Return all checklist_items ordered by category and item name."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, category, item_name, packed, notes "
+                "FROM checklist_items ORDER BY category, item_name"
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
 # Common navigational/stopwords that don't appear in knowledge content.
 # Shared between search_trip_knowledge and any future caller.
 _KNOWLEDGE_STOPWORDS = {
