@@ -333,6 +333,9 @@ def _exec_find_nearby_places(args: dict) -> str:
 
         lines.append(f"\n{i}. {name}{rating_str}\n   {dist_str}{addr_str}{maps_str}{dir_str}")
 
+    lines.append(
+        "\n[Include the walking direction URLs above verbatim in your reply so the user can tap to navigate.]"
+    )
     return "\n".join(lines)
 
 
@@ -596,12 +599,20 @@ async def chat_with_tools(
         {"role": "model", "parts": [{"functionCall": {"name": tool_name, "args": tool_args}}]},
         {"role": "user",  "parts": [{"functionResponse": {"name": tool_name, "response": {"result": tool_result}}}]},
     ]
+    # Append a URL pass-through instruction so Gemini doesn't silently drop links
+    system_prompt_r2 = system_prompt
+    if system_prompt_r2:
+        system_prompt_r2 += (
+            "\n\nWhen tool results contain URLs (maps.google.com, etc.), "
+            "always include them verbatim in your reply so the user can tap to navigate."
+        )
+
     payload2: dict = {
         "contents": contents_r2,
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 800},
     }
-    if system_prompt:
-        payload2["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+    if system_prompt_r2:
+        payload2["systemInstruction"] = {"parts": [{"text": system_prompt_r2}]}
 
     try:
         async with httpx.AsyncClient(timeout=GEMINI_TIMEOUT) as client:
