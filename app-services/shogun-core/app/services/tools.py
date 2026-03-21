@@ -756,16 +756,29 @@ async def chat_with_tools(
         gemini_tool_result = gemini_tool_result[:ds].strip()
 
     # ── Round 2: synthesise final response from tool result ───────────────────
+    # When image_search found a photo, tell Gemini the photo has been sent so it
+    # writes a caption rather than claiming it can't display images.
+    if image_url:
+        r2_result = f"[A photo has been sent to the user.] {gemini_tool_result}"
+        r2_instruction = "A photo was successfully found and is being sent to the user right now. Write a short, friendly caption to accompany it — 1-2 sentences. Do NOT say you cannot display or send images."
+        gemini_tool_result_for_r2 = r2_result
+    else:
+        r2_instruction = None
+        gemini_tool_result_for_r2 = gemini_tool_result
+
     contents_r2 = contents + [
         {"role": "model", "parts": [{"functionCall": {"name": tool_name, "args": tool_args}}]},
-        {"role": "user",  "parts": [{"functionResponse": {"name": tool_name, "response": {"result": gemini_tool_result}}}]},
+        {"role": "user",  "parts": [{"functionResponse": {"name": tool_name, "response": {"result": gemini_tool_result_for_r2}}}]},
     ]
     payload2: dict = {
         "contents": contents_r2,
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 800},
     }
-    if system_prompt:
-        payload2["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+    r2_system = system_prompt
+    if r2_instruction:
+        r2_system = f"{system_prompt}\n\n{r2_instruction}" if system_prompt else r2_instruction
+    if r2_system:
+        payload2["systemInstruction"] = {"parts": [{"text": r2_system}]}
 
     try:
         async with httpx.AsyncClient(timeout=GEMINI_TIMEOUT) as client:
