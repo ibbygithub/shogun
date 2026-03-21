@@ -347,7 +347,7 @@ def build_knowledge_section(rows, city):
 # Per-city document
 # ---------------------------------------------------------------------------
 
-_TRIP_CITIES = ["osaka", "kanazawa", "tokyo", "nara"]
+_TRIP_CITIES = ["osaka", "kanazawa", "kyoto", "tokyo", "nara"]
 
 
 def build_city_document(city, users, prefs, itinerary, pois, knowledge):
