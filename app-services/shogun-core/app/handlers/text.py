@@ -12,6 +12,7 @@ from app.services.tools import chat_with_tools, forced_research
 from app.services.weather import get_weather_for_city
 from app.services.sender import send_photo
 from app.valkey_client import get_context, save_context, get_translate_mode, get_social_mode, clear_social_mode
+from app.services.conversation_logger import log_field, log_section
 
 _IMAGE_URL_RE = re.compile(r"##IMAGE_URL:(https?://\S+)##\n?")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]")
@@ -63,6 +64,14 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
 
     system_prompt = build_system_prompt(user, prefs, weather_str=weather_str)
 
+    # Audit: capture user message and system prompt
+    log_field("user_message", text)
+    log_field("system_prompt", system_prompt)
+    log_field("conversation_history_length", len(history))
+    log_field("conversation_history", history[-6:])  # Last 3 turns for context
+    log_field("city_context", city)
+    log_field("translate_mode", bool(get_translate_mode(telegram_user_id)))
+
     # Translate mode: append translation instruction to system prompt
     if get_translate_mode(telegram_user_id):
         system_prompt += (
@@ -85,6 +94,8 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
             return "Usage: /research [query]\nExample: /research craft beer near osaka airbnb"
         # forced_research bypasses LLM routing and always calls both DB and web search
         reply = await forced_research(query, system_prompt, city_context=city)
+        log_field("route", "forced_research")
+        log_field("research_query", query)
         # Persist just this exchange
         history.append({"role": "user", "content": text})
         history.append({"role": "assistant", "content": reply})
@@ -95,6 +106,7 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
 
     # Route through Gemini function calling. Falls back to RAG on any error.
     reply = await chat_with_tools(text, history, system_prompt, city_context=city)
+    log_field("route", "chat_with_tools")
 
     # If an image was found, send it as a Telegram photo with the caption embedded.
     # Return None so main.py sends {} — the gateway stays silent (no second text message).

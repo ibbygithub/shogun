@@ -6,6 +6,7 @@ import logging
 import httpx
 from datetime import datetime, timezone, timedelta
 from app.config import settings
+from app.services.conversation_logger import log_field, log_section
 
 # Japan Standard Time — used to derive "today" for trip context
 _JST = timezone(timedelta(hours=9))
@@ -139,6 +140,19 @@ async def chat(
         "max_output_tokens": max_tokens,
     }
 
+    # Audit: log the full LLM request
+    log_section("llm_gateway_request", {
+        "provider": "google",
+        "model": "gemini-2.0-flash",
+        "message_count": len(payload["messages"]),
+        "system_prompt_length": len(system_prompt),
+        "max_output_tokens": max_tokens,
+        "messages": payload["messages"],
+    })
+
+    import time as _time
+    _t = _time.time()
+
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(
@@ -152,11 +166,27 @@ async def chat(
             # Strip any role prefix Gemini occasionally prepends
             if text.upper().startswith("ASSISTANT:"):
                 text = text[10:].lstrip()
+
+            # Audit: log the full LLM response
+            log_section("llm_gateway_response", {
+                "output_text": text,
+                "usage": data.get("usage"),
+                "latency_ms": round((_time.time() - _t) * 1000),
+            })
+
             return text
 
     except httpx.TimeoutException:
         logger.error("LLM gateway timeout after %.0fs", TIMEOUT)
+        log_section("llm_gateway_response", {
+            "error": "timeout",
+            "latency_ms": round((_time.time() - _t) * 1000),
+        })
         return "Sorry, I'm taking too long to respond. Please try again."
     except Exception as exc:
         logger.error("LLM gateway error: %s", exc)
+        log_section("llm_gateway_response", {
+            "error": str(exc),
+            "latency_ms": round((_time.time() - _t) * 1000),
+        })
         return "Sorry, I couldn't reach my thinking engine right now. Please try again in a moment."

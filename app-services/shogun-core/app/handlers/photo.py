@@ -12,6 +12,7 @@ from app.services.llm import build_system_prompt
 from app.valkey_client import get_context, save_context, get_social_mode, clear_social_mode
 from app.db import get_connection
 from app.config import settings
+from app.services.conversation_logger import log_field, log_section
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,11 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
         return "I received your photo but couldn't analyze it. Please try again."
 
     logger.info("Photo analyzed for %s", user["display_name"])
+    log_field("user_display_name", user["display_name"])
+    log_field("caption", caption)
+    log_field("prompt", prompt)
+    log_field("analysis", analysis)
+    log_field("system_prompt", build_system_prompt(user, prefs))
 
     # Save to conversation context so follow-up questions have photo context
     history = get_context(telegram_user_id)

@@ -20,6 +20,7 @@ from datetime import date, timezone, timedelta
 
 import httpx
 
+from app.services.conversation_logger import log_field, log_section
 from app.config import settings
 from app import db as _db
 
@@ -659,6 +660,14 @@ async def location_triggered_places(
             "food, sights, shops, or practical info. 2-3 sentences. They're on the move."
         )
 
+    # Audit: log location-triggered places
+    log_section("location_places", {
+        "lat": lat,
+        "lng": lng,
+        "places_found": len(places_lines),
+        "places": places_lines,
+    })
+
     if not settings.google_api_key:
         return f"You're at {lat:.4f}, {lng:.4f}."
 
@@ -719,6 +728,15 @@ async def forced_research(
     else:
         context = "\n\n---\n\n".join(parts)
 
+    # Audit: log forced research results
+    log_section("forced_research", {
+        "query": query,
+        "city_context": city_context,
+        "kb_results_found": not kb_results.startswith("No knowledge items") if kb_results else False,
+        "web_results_found": bool(parts) and len(parts) > (1 if not kb_results.startswith("No knowledge items") else 0),
+        "context_length": len(context),
+    })
+
     if not settings.google_api_key:
         return _truncate(context)
 
@@ -777,12 +795,26 @@ async def chat_with_tools(
     if system_prompt:
         payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
+    # Audit: log Gemini Round 1 request
+    log_section("gemini_r1_request", {
+        "model": GEMINI_MODEL,
+        "content_count": len(contents),
+        "tool_count": len(TELEGRAM_TOOLS),
+        "system_prompt_length": len(system_prompt) if system_prompt else 0,
+    })
+
     # ── Round 1: may return a tool call or a direct text response ────────────
     try:
         async with httpx.AsyncClient(timeout=GEMINI_TIMEOUT) as client:
             resp = await client.post(_gemini_url(), json=payload)
             resp.raise_for_status()
             raw1 = resp.json()
+            # Audit: log Gemini Round 1 response
+            log_section("gemini_r1_response", {
+                "has_function_call": bool(_extract_function_call(raw1)),
+                "has_text": bool(_extract_text(raw1)),
+                "raw_candidates_count": len(raw1.get("candidates", [])),
+            })
     except Exception as exc:
         logger.warning("tools: Gemini call 1 failed (%s) — falling back to RAG", exc)
         from app.services.rag import respond as _rag
@@ -813,6 +845,8 @@ async def chat_with_tools(
         return await _rag(user_message, history, system_prompt, city_context=city_context)
 
     logger.info("tools: executing %r args=%s", tool_name, json.dumps(tool_args)[:120])
+    log_field("tool_name", tool_name)
+    log_field("tool_args", tool_args)
 
     # ── Tool execution ────────────────────────────────────────────────────────
     try:
@@ -829,6 +863,14 @@ async def chat_with_tools(
     except Exception as exc:
         logger.warning("tools: %r raised %s", tool_name, exc)
         tool_result = f"Tool error ({tool_name}): {exc}. Answer from your Japan expertise instead."
+
+    # Audit: log full tool result
+    log_section("tool_execution", {
+        "tool_name": tool_name,
+        "args": tool_args,
+        "result_length": len(tool_result),
+        "result": tool_result[:5000],  # Cap at 5KB to avoid huge log lines
+    })
 
     # ── Strip verbatim blocks before passing to Gemini ───────────────────────
     # find_nearby_places embeds ##DIRECTIONS_START##/##DIRECTIONS_END## blocks.
@@ -884,6 +926,12 @@ async def chat_with_tools(
             resp2 = await client.post(_gemini_url(), json=payload2)
             resp2.raise_for_status()
             reply = _extract_text(resp2.json())
+            # Audit: log Gemini Round 2 response
+            log_section("gemini_r2_response", {
+                "output_text": reply[:3000] if reply else None,
+                "had_verbatim_block": bool(verbatim_block),
+                "had_image_url": bool(image_url),
+            })
     except Exception as exc:
         logger.warning("tools: Gemini call 2 failed (%s) — returning raw tool result", exc)
         reply = gemini_tool_result

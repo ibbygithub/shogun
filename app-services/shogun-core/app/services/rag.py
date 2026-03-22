@@ -12,6 +12,7 @@ import logging
 from app.services import tavily as tavily_svc
 from app.services.llm import chat
 from app import db as _db
+from app.services.conversation_logger import log_field, log_section
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,13 @@ async def respond(
     is_food   = _is_food_query(user_query)
     is_event  = _is_event_query(user_query)
 
+    log_section("rag_routing", {
+        "is_food_query": is_food,
+        "is_event_query": is_event,
+        "city_context": city_context,
+        "query": user_query,
+    })
+
     if not is_food and not is_event:
         messages = history + [{"role": "user", "content": user_query}]
         return await chat(messages, system_prompt, max_tokens=max_tokens)
@@ -75,6 +83,7 @@ async def respond(
         else:
             search_q = f"{user_query}{city_part} Japan 2026"
         logger.info("RAG: event/sakura query — open Tavily search: %r", search_q[:80])
+        log_field("rag_search_query", search_q)
 
         snippets = await tavily_svc.search(search_q, domains=None, max_results=4)
 
@@ -103,6 +112,12 @@ async def respond(
 
     if kb_rows:
         logger.info("RAG: knowledge DB returned %d result(s) — skipping Tavily", len(kb_rows))
+        log_section("rag_knowledge_db", {
+            "hit_count": len(kb_rows),
+            "results": [{"city": r["city"], "category": r["category"],
+                          "topic": r["topic"], "summary": (r["content_summary"] or "")[:200]}
+                         for r in kb_rows[:10]],
+        })
         context_lines = []
         for row in kb_rows:
             city_label = (row["city"] or "").title() or "General"
@@ -123,6 +138,8 @@ async def respond(
     # Knowledge base empty — fall back to Tavily with Tabelog domain restriction
     search_q = f"{user_query} Japan" if not city_context else f"{user_query} {city_context} Japan"
     logger.info("RAG: knowledge DB empty — searching Tavily (Tabelog): %r", search_q[:80])
+    log_field("rag_tavily_fallback", True)
+    log_field("rag_tavily_query", search_q)
 
     snippets = await tavily_svc.search(search_q, domains=_TABELOG_DOMAINS, max_results=4)
 

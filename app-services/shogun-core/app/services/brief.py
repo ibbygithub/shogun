@@ -9,6 +9,7 @@ from app import db
 from app.config import settings
 from app.services import weather as weather_svc
 from app.services.sender import send_message
+from app.services.conversation_logger import new_log, log_field, flush_log
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +51,19 @@ async def send_morning_brief():
     # Build the shared brief content
     brief_text = await _build_brief(today_jst)
 
+    # Audit: log the generated brief content
+    new_log("brief")
+    log_field("date", str(today_jst))
+    log_field("brief_text", brief_text)
+    log_field("recipient_count", len(users))
+
     # Send to each user
     for user_id, telegram_id, display_name in users:
         text = f"Good morning, {display_name.split()[0]}! 🌅\n\n{brief_text}"
         ok = await send_message(telegram_id, text, parse_mode="Markdown")
         logger.info("Morning brief sent to user=%s telegram_id=%s ok=%s", user_id, telegram_id, ok)
+
+    flush_log()
 
 
 def _get_active_users():

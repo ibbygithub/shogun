@@ -9,6 +9,7 @@ from app.services.telegram_files import download_file_b64
 from app.services.llm import chat, build_system_prompt
 from app.valkey_client import get_context, save_context, get_translate_mode
 from app.config import settings
+from app.services.conversation_logger import log_field, log_section
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,9 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
         return "I received your voice message but couldn't make out the words. Please try again."
 
     logger.info("Voice transcribed for %s: %r", user["display_name"], transcription[:80])
+    log_field("user_display_name", user["display_name"])
+    log_field("transcription", transcription)
+    log_field("mime_type", mime_type)
 
     telegram_user_id = envelope.from_.user_id
     history = get_context(telegram_user_id)
@@ -64,6 +68,7 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
 
     # If translate mode is on, treat voice as a translation request
     translate = get_translate_mode(telegram_user_id)
+    log_field("translate_mode", bool(translate))
     if translate:
         user_content = (
             f"[Voice transcription]: {transcription}\n\n"
@@ -74,6 +79,8 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
 
     history.append({"role": "user", "content": user_content})
     reply = await chat(history, system_prompt)
+    log_field("system_prompt", system_prompt)
+    log_field("reply_text", reply)
     history.append({"role": "assistant", "content": reply})
 
     if len(history) > 20:

@@ -1,5 +1,5 @@
 # Planning State — Shogun
-Last updated: 2026-03-19 (skill system complete; Cloudflare Tunnel live)
+Last updated: 2026-03-22 (conversation audit logging plan approved)
 
 ## Project Summary
 
@@ -104,6 +104,31 @@ Plan: `outputs/planning/skill-system-plan.md` (Approved)
 **Skill System Initiative: COMPLETE — All 11 skills delivered across 3 repos.**
 
 ### Day 4 (Mar 22) — Data load + dry-run (depends on Day 3 taxonomy)
+
+---
+
+## Conversation Audit Logging — Approved Plan (2026-03-22)
+
+Plan: `outputs/planning/conversation-logging-plan.md`
+
+**Why:** Todd cannot verify AI chatbot resource routing without full request/response
+visibility. Departure is Mar 23. This is the observability floor.
+
+### Phases & Exec Briefs
+| Phase | Brief | Task | Status |
+|-------|-------|------|--------|
+| 1 | exec-brief-4 | conversation_logger.py module + Docker volume mount | Not started |
+| 2-3 | exec-brief-5 | Text handler + LLM + tools + RAG instrumentation | Not started — depends on Brief 4 |
+| 4 | exec-brief-6 | Voice, photo, location, brief handler instrumentation | Not started — depends on Brief 4 |
+| 5 | exec-brief-7 | Deploy to brainnode-01 + end-to-end verify | Not started — depends on Briefs 4-6 |
+
+### Architecture
+- JSONL files at `/opt/logs/shogun/conversations/` on brainnode-01
+- Daily rotation via TimedRotatingFileHandler, 30-day retention
+- `contextvars` per-request accumulator — one write at end of request
+- 5 log streams: conversation, voice, photo, location, brief
+- Full system prompt, full LLM payloads, full tool args/results
+- Stdlib only — no new dependencies
 
 ---
 
@@ -430,5 +455,10 @@ Checklist items: 15 packing items seeded
 | Shogun Web Plan | outputs/planning/shogun-web-plan.md | Approved |
 | City Theme Specification | outputs/planning/shogun-web-city-themes.md | Approved |
 | Coding Agent Execution Brief | outputs/planning/shogun-web-agent-brief.md | Approved |
+| Conversation Logging Plan | outputs/planning/conversation-logging-plan.md | Approved 2026-03-22 |
+| Exec Brief 4 — Logger Module | outputs/planning/exec-brief-4-conversation-logger.md | Ready |
+| Exec Brief 5 — Instrumentation | outputs/planning/exec-brief-5-instrumentation.md | Ready |
+| Exec Brief 6 — Handler Instrumentation | outputs/planning/exec-brief-6-handler-instrumentation.md | Ready |
+| Exec Brief 7 — Deploy + Verify | outputs/planning/exec-brief-7-deploy-verify.md | Ready |
 | Risk Register | outputs/planning/shogun-risks.md | Draft |
 | Chatbot Fix + AI Enrichment + Dashboard Tiles | outputs/planning/chatbot-dashboard-enrichment-plan.md | Approved — ready for execution |

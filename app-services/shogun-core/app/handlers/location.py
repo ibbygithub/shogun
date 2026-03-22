@@ -10,6 +10,7 @@ from app.models import TelegramEnvelope
 from app.services.llm import build_system_prompt
 from app.services.tools import location_triggered_places
 from app.valkey_client import get_context, save_context, get_location, save_location
+from app.services.conversation_logger import log_field, log_section
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,17 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
         "Location delta for %s: %.0fm moved, %ds elapsed (thresholds: %dm, %ds)",
         user["display_name"], distance, elapsed, TRIGGER_METERS, COOLDOWN_SECONDS,
     )
+    log_field("user_display_name", user["display_name"])
+    log_field("lat", lat)
+    log_field("lng", lng)
+    log_field("is_live", is_live)
+    log_section("location_delta", {
+        "distance_m": round(distance),
+        "elapsed_s": elapsed,
+        "trigger_threshold_m": TRIGGER_METERS,
+        "cooldown_s": COOLDOWN_SECONDS,
+        "triggered": distance >= TRIGGER_METERS and elapsed >= COOLDOWN_SECONDS,
+    })
 
     if distance < TRIGGER_METERS or elapsed < COOLDOWN_SECONDS:
         return None  # Not far enough, or too soon since last trigger
@@ -83,6 +95,7 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
 
     # Call Places API with actual GPS coordinates, then synthesise via Gemini
     reply = await location_triggered_places(lat, lng, system_prompt, history)
+    log_field("reply_text", reply)
 
     # Store the exchange so follow-up questions ("tell me more") work naturally
     history.append({"role": "user", "content": f"[Location update: {lat:.5f}, {lng:.5f}]"})
