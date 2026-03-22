@@ -11,6 +11,7 @@ export interface ItineraryLeg {
   confirmation_number: string | null;
   notes: string | null;
   status: string | null;
+  trip_poi_id?: number | null;
 }
 
 export interface Poi {

@@ -23,12 +23,13 @@ class ScheduleRequest(BaseModel):
     poi_name: str
     city: str
     notes: Optional[str] = ""
+    poi_id: Optional[int] = None
 
 
 def _row_to_leg(row) -> ItineraryLeg:
     """Map a trip_itinerary DB row to ItineraryLeg.
     Column order: id, leg_type, city, date_local, title,
-                  notes_en, address_en, address_ja, confirmation_number, notes_ja
+                  notes_en, address_en, address_ja, confirmation_number, notes_ja, trip_poi_id
     """
     return ItineraryLeg(
         id=row[0],
@@ -43,6 +44,7 @@ def _row_to_leg(row) -> ItineraryLeg:
         confirmation_number=row[8],
         notes=row[9],             # notes_ja
         status=None,
+        trip_poi_id=row[10] if len(row) > 10 else None,
     )
 
 
@@ -74,16 +76,28 @@ def schedule_poi(
 
             notes_en = body.notes if body.notes else None
 
+            # Resolve POI ID: use provided ID, or look up by exact name match
+            poi_id = body.poi_id
+            if not poi_id:
+                cur.execute(
+                    "SELECT id FROM trip_pois WHERE name_en = %s LIMIT 1",
+                    (body.poi_name,),
+                )
+                match = cur.fetchone()
+                if match:
+                    poi_id = match[0]
+
             cur.execute(
                 """
                 INSERT INTO trip_itinerary
-                    (leg_type, date_local, city, title, notes_en, leg_sequence)
+                    (leg_type, date_local, city, title, notes_en, leg_sequence, trip_poi_id)
                 VALUES
-                    ('activity', %s, %s, %s, %s, %s)
+                    ('activity', %s, %s, %s, %s, %s, %s)
                 RETURNING id, leg_type, city, date_local, title,
-                          notes_en, address_en, address_ja, confirmation_number, notes_ja
+                          notes_en, address_en, address_ja, confirmation_number, notes_ja,
+                          trip_poi_id
                 """,
-                (body.date, body.city, body.poi_name, notes_en, leg_sequence),
+                (body.date, body.city, body.poi_name, notes_en, leg_sequence, poi_id),
             )
             new_row = cur.fetchone()
         conn.commit()
@@ -104,7 +118,8 @@ def get_planning_itinerary(
             cur.execute(
                 """
                 SELECT id, leg_type, city, date_local, title,
-                       notes_en, address_en, address_ja, confirmation_number, notes_ja
+                       notes_en, address_en, address_ja, confirmation_number, notes_ja,
+                       trip_poi_id
                 FROM trip_itinerary
                 ORDER BY date_local, leg_sequence
                 """

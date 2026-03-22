@@ -16,6 +16,7 @@ class ItineraryLeg(BaseModel):
     confirmation_number: Optional[str]
     notes: Optional[str]
     status: Optional[str]
+    trip_poi_id: Optional[int] = None
 
 
 class ItineraryLegCreate(BaseModel):

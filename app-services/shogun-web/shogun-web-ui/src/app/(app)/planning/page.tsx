@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import type { Poi, ItineraryLeg } from "@/lib/types";
 import dynamic from "next/dynamic";
@@ -450,7 +451,13 @@ export default function PlanningPage() {
                       {dayLegs.map((leg, i) => (
                         <li key={i} style={{ fontSize: "0.78rem", color: "#374151", display: "flex", alignItems: "center", gap: "0.4rem" }}>
                           <span style={{ color: "#9ca3af", fontSize: "0.7rem" }}>▸</span>
-                          {leg.title ?? leg.name ?? "Unnamed item"}
+                          {leg.trip_poi_id ? (
+                            <Link href={`/pois/${leg.trip_poi_id}`} style={{ color: "var(--city-accent, #1d4ed8)", textDecoration: "none" }}>
+                              {leg.title ?? "Unnamed item"}
+                            </Link>
+                          ) : (
+                            leg.title ?? "Unnamed item"
+                          )}
                         </li>
                       ))}
                     </ul>
