@@ -21,6 +21,16 @@ LLM_URL = "http://192.168.71.220:8080/v1/chat"
 
 INTER_CALL_DELAY = 1.5  # seconds between API calls to avoid rate limits
 
+# City-center fallback coordinates for POIs without lat/lng
+CITY_CENTERS = {
+    "osaka": (34.6937, 135.5023),
+    "nara": (34.6851, 135.8048),
+    "kanazawa": (36.5613, 136.6562),
+    "kyoto": (35.0116, 135.7681),
+    "tokyo": (35.6762, 139.6503),
+    "sakai": (34.5733, 135.4830),
+}
+
 # ---------------------------------------------------------------------------
 # POI type classification
 # ---------------------------------------------------------------------------
@@ -175,16 +185,19 @@ def classify_poi_type(name: str, category: str) -> str:
 
 def search_places(name: str, city: str, lat=None, lng=None) -> dict:
     """Search Google Places for canonical info."""
+    # Gateway requires lat/lng — use city center as fallback
+    anchor_lat = float(lat) if lat else CITY_CENTERS.get(city, (35.6762, 139.6503))[0]
+    anchor_lng = float(lng) if lng else CITY_CENTERS.get(city, (35.6762, 139.6503))[1]
+    radius = 500 if (lat and lng) else 5000
     payload = {
         "text_query": f"{name} {city} Japan",
+        "lat": anchor_lat,
+        "lng": anchor_lng,
+        "radius_m": radius,
         "max_results": 1,
         "language_code": "en",
         "region_code": "JP",
     }
-    if lat and lng:
-        payload["lat"] = float(lat)
-        payload["lng"] = float(lng)
-        payload["radius_m"] = 500
     try:
         resp = httpx.post(PLACES_URL, json=payload, timeout=10)
         resp.raise_for_status()
