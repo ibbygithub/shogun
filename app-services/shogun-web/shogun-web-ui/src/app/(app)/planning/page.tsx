@@ -399,7 +399,7 @@ export default function PlanningPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
             {days.map((dateKey) => {
               const city = cityForDate(dateKey);
-              const dayLegs = (itinerary[dateKey] ?? []) as Array<{ title?: string; name?: string }>;
+              const dayLegs = (itinerary[dateKey] ?? []) as Array<{ title?: string; name?: string; trip_poi_id?: number | null }>;
               const d = new Date(dateKey + "T12:00:00");
               const weekday = d.toLocaleDateString("en", { weekday: "short" });
               const monthDay = d.toLocaleDateString("en", { month: "short", day: "numeric" });
