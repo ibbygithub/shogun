@@ -11,7 +11,7 @@ from app.services.llm import chat, build_system_prompt
 from app.services.tools import chat_with_tools, forced_research
 from app.services.weather import get_weather_for_city
 from app.services.sender import send_photo
-from app.valkey_client import get_context, save_context, get_translate_mode
+from app.valkey_client import get_context, save_context, get_translate_mode, get_social_mode, clear_social_mode
 
 _IMAGE_URL_RE = re.compile(r"##IMAGE_URL:(https?://\S+)##\n?")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]")
@@ -38,6 +38,10 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
     if not user:
         logger.warning("Unregistered user %s sent: %s", telegram_user_id, text[:50])
         return "Hi! I'm Shogun, the Ibbotson family Japan concierge. You're not registered in my system. Ask Todd to add you."
+
+    # Social capture mode — save text to trip journal instead of chatting
+    if get_social_mode(telegram_user_id):
+        return _handle_social_capture(text, telegram_user_id, user)
 
     # Build conversation context
     history = get_context(telegram_user_id)
@@ -116,3 +120,36 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
     save_context(telegram_user_id, history)
 
     return reply
+
+
+def _handle_social_capture(text: str, telegram_user_id: int, user: dict) -> str:
+    """Handle a text message while in social capture mode."""
+    from app.db import get_connection
+    from app import db as _db
+    from datetime import datetime, timezone, timedelta
+    import psycopg2 as _pg
+
+    _JST = timezone(timedelta(hours=9))
+    today_jst = datetime.now(_JST).strftime("%Y-%m-%d")
+    city = _db.get_city_for_date(today_jst)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO social_notes
+                   (user_id, telegram_user_id, note_type, text_content, city)
+                   VALUES (%s, %s, 'text', %s, %s)
+                   RETURNING id""",
+                (user["id"], telegram_user_id, text, city),
+            )
+            note_id = cur.fetchone()["id"]
+        conn.commit()
+        clear_social_mode(telegram_user_id)
+        return f"\U0001f4dd Note #{note_id} saved to your trip journal!"
+    except _pg.Error as exc:
+        logger.error("Social capture failed: %s", exc)
+        conn.rollback()
+        return "Failed to save. Try again with /social"
+    finally:
+        conn.close()
