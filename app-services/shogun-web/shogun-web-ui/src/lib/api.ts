@@ -42,6 +42,7 @@ export const api = {
       return apiFetch(`/pois?${params}`);
     },
     knowledge: (id: number) => apiFetch(`/pois/${id}/knowledge`),
+    guide: (id: number) => apiFetch(`/pois/${id}/guide`),
   },
   weather: {
     get: (city: string) => apiFetch(`/weather?city=${city}`),
