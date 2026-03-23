@@ -369,3 +369,117 @@ Proactive daily message sent at 7:00 AM JST to all users with `notification_acti
 | PostgreSQL | `192.168.71.221:5432` (shogun_v1) | 5s connect | Users, preferences, itinerary, POIs, knowledge |
 | Telegram Bot API | `api.telegram.org` (external) | 30s | Voice/photo file downloads |
 | Gemini REST API | `generativelanguage.googleapis.com` (external) | 30s | Function calling (web UI only) |
+| Google Places Gateway | `http://192.168.71.220:8081` (internal IP) | 10s | `find_nearby_places` tool |
+
+---
+
+## Gemini LLM Constraints and Architectural Workarounds
+
+**This section documents hard-won lessons. Do not skip it when modifying AI behavior.**
+
+### The Fundamental Limitation: Gemini Reformats Everything
+
+Gemini 2.0 Flash will **always** rewrite tool result text into its own prose. You cannot instruct it to output specific URLs, structured lists, or pre-formatted content verbatim through system prompt instructions alone — no matter how strong the wording. Instructions like "copy these links exactly" or "use this text verbatim" are ignored in practice.
+
+This is not a prompt engineering problem. It is fundamental LLM behavior. Attempting to fix it by iterating on system prompt wording wastes tokens and time with no result.
+
+### The Bypass Pattern: `##FORMATTED_BLOCK##`
+
+The architectural solution is to prevent Gemini from ever seeing the pre-formatted content, then append it to the final response after Gemini generates its text.
+
+How it works in `_run_chat_with_tools` (in `chat.py`):
+
+```
+_BLOCK_START = "##FORMATTED_BLOCK_START##"
+_BLOCK_END   = "##FORMATTED_BLOCK_END##"
+```
+
+1. A tool returns: `[plain text context for Gemini]\n##FORMATTED_BLOCK_START##\n[pre-built markdown]\n##FORMATTED_BLOCK_END##`
+2. `_run_chat_with_tools` detects the block markers
+3. The block content is extracted and stored in `formatted_blocks[]`
+4. Only the plain text (before `##FORMATTED_BLOCK_START##`) is sent to Gemini as the tool result
+5. After Gemini produces its text response, the formatted blocks are appended verbatim
+
+**When to use this pattern:**
+- Pre-built Google Maps direction links (URLs must be exact)
+- Numbered place cards with distances, walking times, and links
+- Any content where the exact format is load-bearing (not just informational)
+
+**When NOT to use this pattern:**
+- General text answers where Gemini's synthesis is desirable
+- Search results where Gemini should summarize and contextualize
+- Conversational responses
+
+### Place Data Architecture
+
+The `find_nearby_places` tool uses the formatted block pattern to deliver place cards. The tool:
+
+1. Calls Google Places gateway `searchNearby` endpoint at `http://192.168.71.220:8081`
+2. Gets lat/lng from the API response (`places.location`) for every result
+3. Calculates real haversine distance from the anchor coordinate to each place
+4. Sorts all results closest-first — **no hard filter** (hard filtering caused critical data loss in testing when shops were just outside the requested radius)
+5. Labels results beyond the requested radius so the user can decide
+6. Builds two Google Maps links per place:
+   - **Walk from [Anchor]**: uses the anchor's exact lat/lng as origin — shows walking directions from the trip accommodation
+   - **Navigate from here**: no `origin=` param — Google Maps uses device GPS automatically
+7. Returns plain summary for Gemini + formatted block with full place cards
+
+**Critical: never generate Google Maps direction URLs manually.** The tool builds them from real lat/lng coordinates. Any manually-constructed URL that doesn't use real coordinates will be wrong.
+
+### Tool Inventory (Web UI) — Current State
+
+11 tools as of 2026-03-20:
+
+| Tool | Purpose | DB Table | Mutating |
+|------|---------|----------|----------|
+| `get_itinerary_legs` | Read trip calendar | `trip_itinerary` | No |
+| `update_itinerary_leg` | Modify leg fields | `trip_itinerary` | Yes |
+| `create_itinerary_leg` | Add new activity | `trip_itinerary` | Yes |
+| `delete_itinerary_leg` | Remove activity | `trip_itinerary` | Yes |
+| `get_trip_overview` | Day-by-day summary | `trip_itinerary` | No |
+| `search_trip_knowledge` | Search knowledge base | `knowledge_items` | No |
+| `web_search` | Tavily + auto-save + `include_domains` support | `knowledge_items` | Yes (insert) |
+| `get_trip_pois` | Browse POIs | `trip_pois` | No |
+| `get_checklist_items` | Read packing list | `checklist_items` | No |
+| `toggle_checklist_item` | Pack/unpack item | `checklist_items` | Yes |
+| `find_nearby_places` | Google Places nearby search with direction links | `knowledge_items` | Yes (insert) |
+
+The original `CALENDAR_TOOLS` section above documents 10 tools — the `find_nearby_places` tool was added 2026-03-20 and must be included in any tool audit.
+
+### `web_search` — `include_domains` Parameter
+
+`web_search` accepts an optional `include_domains` array to restrict Tavily results to specific domains. Key usage:
+
+```
+include_domains: ["tabelog.com"]   → Tabelog restaurant reviews only
+include_domains: []                → Unrestricted search (default)
+```
+
+Gemini should pass `include_domains: ["tabelog.com"]` when the user asks for restaurant reviews, ratings, or Tabelog-specific info.
+
+### Source Transparency: `tool_actions` Pipeline
+
+Every AI response in the web UI carries a `tool_actions` list. This list is the source of the green "✓ tool used" badges the user sees in the chat.
+
+Key behavioral rules:
+- `tool_actions` is **always stored** in Valkey with the assistant message, even when it is an empty list `[]`
+- An empty `[]` means "AI answered without calling any tool" → renders as gray "No tools called — answered from conversation context" badge
+- `undefined` tool_actions (old messages before this feature) → no badge rendered
+- The Valkey history endpoint returns `tool_actions` even for empty lists (`if "tool_actions" in h:` not `if h.get("tool_actions"):`)
+
+This is the user's primary way to see "how the AI got its answer." It must never be silently dropped.
+
+### System Prompt Behavioral Rules (Web UI) — Current State
+
+The system prompt in `_build_system_prompt()` in `chat.py` enforces 10 numbered rules (as of 2026-03-20). When adding new behavior, add it as a numbered rule or to the relevant section:
+
+- Rule 1–3: Search protocol (knowledge base → web search → expertise fallback)
+- Rule 4: Location context persistence
+- Rule 5: Itinerary management discipline (read before write)
+- Rule 6: Answer quality standard (specific, never vague)
+- Rule 7: Currency in yen, transit with line names
+- Rule 8: Full trip context available
+- Rule 9: No destructive actions without explicit confirmation
+- Rule 10: Links and maps — deliver in the same response, never say "I will provide," copy pre-built direction links exactly
+
+Key: Rule 10 exists because Gemini would sometimes say "I'll get those links for you" and then not include them. The rule reinforces the behavior but is backed by the formatted block architecture for reliable delivery.
