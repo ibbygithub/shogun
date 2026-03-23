@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str        # Used to download voice/photo files from Telegram
     tavily_gateway_url: str = "https://tavily.platform.ibbytech.com"
     scraper_gateway_url: str = "https://scrape.platform.ibbytech.com"
+    places_gateway_url: str = "http://192.168.71.220:8081"
+
+    # Gemini direct REST — used for function-calling (llm-gateway doesn't support tool declarations)
+    google_api_key: str = ""
+    google_base_url: str = "https://generativelanguage.googleapis.com"
 
     # App
     app_host: str = "0.0.0.0"

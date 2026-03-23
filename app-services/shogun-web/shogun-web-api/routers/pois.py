@@ -113,3 +113,64 @@ def get_poi_knowledge(
         "suggested_searches": suggested_searches,
         "booking_url": poi.map_url,
     }
+
+
+@router.get("/{poi_id}/guide")
+def get_poi_guide(
+    poi_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, city, name_en, name_ja, category, lat, lng,
+                          tags, crowd_notes, best_time_notes, source
+                   FROM trip_pois WHERE id=%s""",
+                (poi_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="POI not found")
+            poi = _row_to_poi(row)
+
+            cur.execute(
+                """SELECT poi_type, overview, why_go, whats_there,
+                          hours_info, admission_info, time_estimate,
+                          transit_info, tips, trip_context,
+                          photos, official_url, sources,
+                          hours_verified, completeness, generated_utc
+                   FROM poi_guides WHERE trip_poi_id=%s""",
+                (poi_id,),
+            )
+            guide_row = cur.fetchone()
+
+    if not guide_row:
+        return {
+            "poi": poi,
+            "guide": None,
+            "has_guide": False,
+        }
+
+    return {
+        "poi": poi,
+        "has_guide": True,
+        "guide": {
+            "poi_type": guide_row[0],
+            "overview": guide_row[1],
+            "why_go": guide_row[2],
+            "whats_there": guide_row[3],
+            "hours_info": guide_row[4],
+            "admission_info": guide_row[5],
+            "time_estimate": guide_row[6],
+            "transit_info": guide_row[7],
+            "tips": guide_row[8],
+            "trip_context": guide_row[9],
+            "photos": guide_row[10],
+            "official_url": guide_row[11],
+            "sources": guide_row[12],
+            "hours_verified": guide_row[13],
+            "completeness": guide_row[14],
+            "generated_utc": str(guide_row[15]) if guide_row[15] else None,
+        },
+    }

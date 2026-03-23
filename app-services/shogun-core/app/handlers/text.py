@@ -4,12 +4,18 @@ Checks for system commands first, then routes to LLM (with RAG for food/place qu
 Translate mode: when active, appends translation instruction to the system prompt.
 """
 import logging
+import re
 from app.models import TelegramEnvelope
-from app.commands.system import handle_command
+from app.commands.system import handle_command, handle_async_command
 from app.services.llm import chat, build_system_prompt
-from app.services.rag import respond as rag_respond
+from app.services.tools import chat_with_tools, forced_research
 from app.services.weather import get_weather_for_city
-from app.valkey_client import get_context, save_context, get_translate_mode
+from app.services.sender import send_photo
+from app.valkey_client import get_context, save_context, get_translate_mode, get_social_mode, clear_social_mode
+from app.services.conversation_logger import log_field, log_section
+
+_IMAGE_URL_RE = re.compile(r"##IMAGE_URL:(https?://\S+)##\n?")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]")
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +30,19 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
         reply = handle_command(text, user)
         if reply:
             return reply
+        # Async commands (/brief) and /research are handled below
+        async_reply = await handle_async_command(text, user)
+        if async_reply is not None:
+            return async_reply
 
     # Unknown users get a polite rejection
     if not user:
         logger.warning("Unregistered user %s sent: %s", telegram_user_id, text[:50])
         return "Hi! I'm Shogun, the Ibbotson family Japan concierge. You're not registered in my system. Ask Todd to add you."
+
+    # Social capture mode — save text to trip journal instead of chatting
+    if get_social_mode(telegram_user_id):
+        return _handle_social_capture(text, telegram_user_id, user)
 
     # Build conversation context
     history = get_context(telegram_user_id)
@@ -36,6 +50,7 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
     # Pre-fetch weather asynchronously so build_system_prompt can inject it
     # City is derived from the itinerary; fall back gracefully if unavailable
     weather_str: str | None = None
+    city: str | None = None
     try:
         from datetime import datetime, timezone, timedelta
         from app import db
@@ -49,6 +64,14 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
 
     system_prompt = build_system_prompt(user, prefs, weather_str=weather_str)
 
+    # Audit: capture user message and system prompt
+    log_field("user_message", text)
+    log_field("system_prompt", system_prompt)
+    log_field("conversation_history_length", len(history))
+    log_field("conversation_history", history[-6:])  # Last 3 turns for context
+    log_field("city_context", city)
+    log_field("translate_mode", bool(get_translate_mode(telegram_user_id)))
+
     # Translate mode: append translation instruction to system prompt
     if get_translate_mode(telegram_user_id):
         system_prompt += (
@@ -57,9 +80,49 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
             "For any English text they send: translate to Japanese and show both. "
             "Keep translations natural and note any cultural context where useful."
         )
+    elif _CJK_RE.search(text):
+        # Auto-detect Japanese/CJK even when translate mode is off
+        system_prompt += (
+            "\n\nThe user has sent Japanese text. "
+            "Translate it to English and provide helpful context if relevant."
+        )
 
-    # Route through RAG for food/place queries, plain LLM otherwise
-    reply = await rag_respond(text, history, system_prompt)
+    # /research [query] — always searches, never answers from memory
+    if text.lower().startswith("/research"):
+        query = text[9:].strip()
+        if not query:
+            return "Usage: /research [query]\nExample: /research craft beer near osaka airbnb"
+        # forced_research bypasses LLM routing and always calls both DB and web search
+        reply = await forced_research(query, system_prompt, city_context=city)
+        log_field("route", "forced_research")
+        log_field("research_query", query)
+        # Persist just this exchange
+        history.append({"role": "user", "content": text})
+        history.append({"role": "assistant", "content": reply})
+        if len(history) > 20:
+            history = history[-20:]
+        save_context(telegram_user_id, history)
+        return reply
+
+    # Route through Gemini function calling. Falls back to RAG on any error.
+    reply = await chat_with_tools(text, history, system_prompt, city_context=city)
+    log_field("route", "chat_with_tools")
+
+    # If an image was found, send it as a Telegram photo with the caption embedded.
+    # Return None so main.py sends {} — the gateway stays silent (no second text message).
+    img_match = _IMAGE_URL_RE.search(reply)
+    if img_match:
+        image_url = img_match.group(1)
+        caption = _IMAGE_URL_RE.sub("", reply).strip()
+        await send_photo(envelope.chat.id, image_url, caption)
+        # Persist a clean version of the exchange without the URL marker
+        clean_reply = caption if caption else "Here's a photo!"
+        history.append({"role": "user", "content": text})
+        history.append({"role": "assistant", "content": clean_reply})
+        if len(history) > 20:
+            history = history[-20:]
+        save_context(telegram_user_id, history)
+        return None  # photo already sent with caption — gateway must not send a second message
 
     # Persist updated context (user + assistant turn)
     history.append({"role": "user", "content": text})
@@ -69,3 +132,36 @@ async def handle(envelope: TelegramEnvelope, user: dict | None, prefs: list[dict
     save_context(telegram_user_id, history)
 
     return reply
+
+
+def _handle_social_capture(text: str, telegram_user_id: int, user: dict) -> str:
+    """Handle a text message while in social capture mode."""
+    from app.db import get_connection
+    from app import db as _db
+    from datetime import datetime, timezone, timedelta
+    import psycopg2 as _pg
+
+    _JST = timezone(timedelta(hours=9))
+    today_jst = datetime.now(_JST).strftime("%Y-%m-%d")
+    city = _db.get_city_for_date(today_jst)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO social_notes
+                   (user_id, telegram_user_id, note_type, text_content, city)
+                   VALUES (%s, %s, 'text', %s, %s)
+                   RETURNING id""",
+                (user["id"], telegram_user_id, text, city),
+            )
+            note_id = cur.fetchone()["id"]
+        conn.commit()
+        clear_social_mode(telegram_user_id)
+        return f"\U0001f4dd Note #{note_id} saved to your trip journal!"
+    except _pg.Error as exc:
+        logger.error("Social capture failed: %s", exc)
+        conn.rollback()
+        return "Failed to save. Try again with /social"
+    finally:
+        conn.close()

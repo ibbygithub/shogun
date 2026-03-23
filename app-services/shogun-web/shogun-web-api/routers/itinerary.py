@@ -22,6 +22,7 @@ def _row_to_leg(row) -> ItineraryLeg:
         confirmation_number=row[8],
         notes=row[9],           # notes_ja
         status=None,
+        trip_poi_id=row[10] if len(row) > 10 else None,
     )
 
 
@@ -55,7 +56,8 @@ def get_itinerary(
             cur.execute(
                 f"""
                 SELECT id, leg_type, city, date_local, title,
-                       notes_en, address_en, address_ja, confirmation_number, notes_ja
+                       notes_en, address_en, address_ja, confirmation_number, notes_ja,
+                       trip_poi_id
                 FROM trip_itinerary
                 {where}
                 ORDER BY date_local, leg_sequence

@@ -4,6 +4,7 @@ FastAPI application on brainnode-01, port 8082.
 Receives Telegram envelopes from platform-telegram-gateway and returns reply_text.
 """
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -21,6 +22,7 @@ from app.handlers import voice as voice_handler
 from app.handlers import photo as photo_handler
 from app.handlers import media as media_handler
 from app.services.brief import send_morning_brief
+from app.services.conversation_logger import init_loggers, new_log, log_field, log_section, flush_log
 
 logging.basicConfig(
     level=settings.log_level.upper(),
@@ -40,6 +42,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("DB connection FAILED at startup: %s", exc)
         # Don't crash — allow the app to start so /health still responds
+
+    # Initialize conversation audit loggers (JSONL, daily rotation)
+    try:
+        init_loggers()
+        logger.info("Conversation audit loggers initialized → %s",
+                     os.environ.get("SHOGUN_LOG_DIR", "/var/log/shogun/conversations"))
+    except Exception as exc:
+        logger.error("Conversation audit logger init FAILED: %s", exc)
 
     # Start the morning brief scheduler — fires at 22:00 UTC = 7:00 AM JST
     scheduler = AsyncIOScheduler()
@@ -99,6 +109,15 @@ async def telegram_events(request: Request):
         envelope.receipt_id, kind, telegram_user_id, envelope.chat.id,
     )
 
+    # Start audit log for this request
+    stream = {"text": "conversation", "voice": "voice", "photo": "photo",
+              "location": "location"}.get(kind, "conversation")
+    new_log(stream)
+    log_field("receipt_id", envelope.receipt_id)
+    log_field("telegram_user_id", telegram_user_id)
+    log_field("chat_id", envelope.chat.id)
+    log_field("message_kind", kind)
+
     # Load user and preferences from DB
     user = None
     prefs = []
@@ -107,6 +126,7 @@ async def telegram_events(request: Request):
             user = db.get_user_by_telegram_id(telegram_user_id)
             if user:
                 prefs = db.get_user_preferences(user["id"])
+                log_field("user_display_name", user.get("display_name"))
         except Exception as exc:
             logger.error("DB lookup failed for user %s: %s", telegram_user_id, exc)
 
@@ -128,10 +148,15 @@ async def telegram_events(request: Request):
 
     except Exception as exc:
         logger.error("Handler error kind=%s user=%s: %s", kind, telegram_user_id, exc, exc_info=True)
+        log_field("error", str(exc))
         reply_text = "Something went wrong on my end. Please try again."
 
     elapsed = (time.time() - t0) * 1000
     logger.info("receipt=%s handled in %.0fms reply=%s", envelope.receipt_id, elapsed, bool(reply_text))
+
+    # Finalize audit log
+    log_field("reply_text", reply_text)
+    flush_log()
 
     if reply_text:
         return {"reply_text": reply_text}

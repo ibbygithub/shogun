@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ibbotson Japan Trip 2026 — Printable Itinerary</title>
+<style>
+  @media print {
+    body { font-size: 11pt; }
+    .page-break { page-break-before: always; }
+    .no-print { display: none; }
+    @page { margin: 1.5cm; }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    color: #1a1a2e;
+    background: #fff;
+    line-height: 1.5;
+    padding: 2rem;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 2rem;
+    color: #16213e;
+    border-bottom: 3px solid #c0392b;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .subtitle {
+    font-size: 1rem;
+    color: #555;
+    margin-bottom: 2rem;
+  }
+  .emergency-box {
+    background: #fdf2f2;
+    border: 2px solid #c0392b;
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 2rem;
+  }
+  .emergency-box h3 { color: #c0392b; margin-bottom: 0.5rem; }
+  .emergency-box p { font-size: 0.9rem; margin: 0.2rem 0; }
+  .quick-ref {
+    background: #f0f4ff;
+    border: 1px solid #bdc3c7;
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 2rem;
+    columns: 2;
+    column-gap: 2rem;
+  }
+  .quick-ref h3 { column-span: all; color: #16213e; margin-bottom: 0.5rem; }
+  .quick-ref p { font-size: 0.85rem; margin: 0.15rem 0; break-inside: avoid; }
+  .quick-ref .label { font-weight: 600; color: #333; }
+  .day-card {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+  }
+  .day-header {
+    padding: 0.6rem 1rem;
+    color: #fff;
+    font-weight: 700;
+    font-size: 1.1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .day-header .day-num {
+    font-size: 0.85rem;
+    opacity: 0.9;
+    font-weight: 400;
+  }
+  .osaka { background: #e67e22; }
+  .nara { background: #27ae60; }
+  .kanazawa { background: #8e44ad; }
+  .kyoto { background: #c0392b; }
+  .tokyo { background: #2980b9; }
+  .sakai { background: #7f8c8d; }
+  .travel { background: #95a5a6; }
+  .day-body { padding: 0.8rem 1rem; }
+  .leg {
+    display: flex;
+    align-items: flex-start;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .leg:last-child { border-bottom: none; }
+  .leg-time {
+    width: 55px;
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    color: #888;
+    font-weight: 600;
+    padding-top: 2px;
+  }
+  .leg-icon {
+    width: 28px;
+    flex-shrink: 0;
+    font-size: 1.1rem;
+    text-align: center;
+    padding-top: 1px;
+  }
+  .leg-content { flex: 1; }
+  .leg-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #1a1a2e;
+  }
+  .leg-notes {
+    font-size: 0.82rem;
+    color: #555;
+    margin-top: 2px;
+  }
+  .leg-type-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #ecf0f1;
+    color: #666;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .accommodations {
+    background: #fffbea;
+    border: 1px solid #f0e5a0;
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 2rem;
+  }
+  .accommodations h3 { color: #8b6914; margin-bottom: 0.5rem; }
+  .acc-item { margin-bottom: 0.6rem; font-size: 0.9rem; }
+  .acc-item .dates { font-weight: 600; }
+  .acc-item .ja { color: #888; font-size: 0.85rem; }
+  .flight-alert {
+    background: #fff3cd;
+    border-left: 4px solid #e67e22;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0.3rem 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .print-btn {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: #2980b9;
+    color: #fff;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .print-btn:hover { background: #1a6fa0; }
+</style>
+</head>
+<body>
+
+<h1>Ibbotson Japan 2026</h1>
+<p class="subtitle">March 23 — April 9 &nbsp;|&nbsp; 18 days &nbsp;|&nbsp; Osaka · Nara · Sakai · Kyoto · Kanazawa · Tokyo</p>
+
+<button class="print-btn no-print" onclick="window.print()">Print / Save PDF</button>
+
+<!-- EMERGENCY INFO -->
+<div class="emergency-box">
+  <h3>Emergency Information</h3>
+  <p><span class="label">Police:</span> 110 &nbsp;|&nbsp; <span class="label">Ambulance/Fire:</span> 119</p>
+  <p><span class="label">US Embassy Tokyo:</span> 03-3224-5000 &nbsp;|&nbsp; <span class="label">US Consulate Osaka:</span> 06-6315-5900</p>
+  <p><span class="label">Japan Travel Hotline:</span> 050-3816-2787 (English 24/7)</p>
+  <p><span class="label">Lost & Found (JR):</span> 050-2016-1603</p>
+</div>
+
+<!-- ACCOMMODATIONS -->
+<div class="accommodations">
+  <h3>Accommodations</h3>
+  <div class="acc-item">
+    <span class="dates">Mar 24–29 · Osaka</span> — Tenjinbashi Queen Airbnb, Kita-ku<br>
+    <span class="ja">大阪市北区浪花町10-12 · Station: 天神橋筋六丁目 (Tenjinbashisuji-Rokuchome)</span><br>
+    Host: Mayu (contact via Airbnb app)
+  </div>
+  <div class="acc-item">
+    <span class="dates">Mar 30–31 · Kanazawa</span> — Hotel Sanraku Kanazawa<br>
+    <span class="ja">石川県金沢市尾張町1-1-1 · Station: 金沢駅 (Kanazawa) — 5 min walk to Omicho Market</span>
+  </div>
+  <div class="acc-item">
+    <span class="dates">Apr 1–8 · Tokyo</span> — Sugamo Airbnb, Toshima-ku<br>
+    <span class="ja">東京都豊島区巣鴨4-37-6 · Station: 巣鴨 (Sugamo) — Yamanote + Mita lines</span><br>
+    1 stop to Ikebukuro. Jizo-dori shopping street 1 min walk.
+  </div>
+</div>
+
+<!-- QUICK REFERENCE -->
+<div class="quick-ref">
+  <h3>Quick Reference</h3>
+  <p><span class="label">PNR (JAL):</span> APGNWZ</p>
+  <p><span class="label">Ghibli Museum:</span> Booking #7961560155 — Apr 3, NOON entry</p>
+  <p><span class="label">IC Card:</span> Buy ICOCA at KIX vending machine on arrival</p>
+  <p><span class="label">SIM:</span> IIJmio Travel SIM — KIX arrivals vending machine</p>
+  <p><span class="label">Shogun AI:</span> shogun.ibbytech.com (Google login)</p>
+  <p><span class="label">Telegram Bot:</span> @ShogunConciergeBot</p>
+  <p><span class="label">Cash:</span> 7-Eleven / Lawson ATM (international cards OK)</p>
+  <p><span class="label">Tax-free:</span> Show passport, min ¥5,000 at one store</p>
+</div>
+
+<!-- DAY 1: Mar 23 -->
+<div class="day-card">
+  <div class="day-header travel">
+    <span>Sunday, March 23 — Travel Day</span>
+    <span class="day-num">Day 1</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">✈️</div>
+      <div class="leg-content">
+        <div class="leg-title">JL7555 SFO → LAX</div>
+        <div class="leg-notes">Japan Airlines codeshare. Connects to JL69 at Tom Bradley International Terminal.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">✈️</div>
+      <div class="leg-content">
+        <div class="leg-title">JL69 LAX → KIX (Kansai International)</div>
+        <div class="leg-notes">Direct to Kansai. Arrives KIX next afternoon. PNR: APGNWZ.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 2: Mar 24 — Osaka arrival -->
+<div class="day-card">
+  <div class="day-header osaka">
+    <span>Monday, March 24 — Osaka 🏯</span>
+    <span class="day-num">Day 2</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏠</div>
+      <div class="leg-content">
+        <div class="leg-title">Tenjinbashi Queen Airbnb — check in</div>
+        <div class="leg-notes">Host: Mayu. Nearest station: Tenjinbashisuji-Rokuchome (Sakaisuji/Tanimachi lines). 7-Eleven within 2 min.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🚌</div>
+      <div class="leg-content">
+        <div class="leg-title">Airport Limo → Umeda → Tenjinbashisuji 6-chome</div>
+        <div class="leg-notes">Limo Bus to Umeda Station, walk to Higashi Umeda, Tanimachi Line 4 stops, exit gate 13.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🍽️</div>
+      <div class="leg-content">
+        <div class="leg-title">Dinner options (flexible — any Osaka evening)</div>
+        <div class="leg-notes">Hitotsuzuki (okonomiyaki) · Umeda Okonomiyaki Izakaya Fuwatoro · GODROCK BURGER. All near Airbnb.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 3: Mar 25 — Nara -->
+<div class="day-card">
+  <div class="day-header nara">
+    <span>Tuesday, March 25 — Nara Day Trip 🦌</span>
+    <span class="day-num">Day 3</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🚃</div>
+      <div class="leg-content">
+        <div class="leg-title">Osaka → Nara via Kintetsu Nara Line</div>
+        <div class="leg-notes">Tenjinbashisuji-Rokuchome → Metro to Namba → Kintetsu Nara (~40 min). Depart early — arrive before 9am.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">⛩️</div>
+      <div class="leg-content">
+        <div class="leg-title">Kasuga Taisha Shrine / 春日大社</div>
+        <div class="leg-notes">~3,000 bronze and stone lanterns. Less crowded than Todai-ji. 10 min walk from deer park.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🦌</div>
+      <div class="leg-content">
+        <div class="leg-title">Nara Park → Todai-ji / 奈良公園 → 東大寺</div>
+        <div class="leg-notes">Walk north through deer park. Cherry blossom peak late March. Great Buddha Hall (Daibutsuden).</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏛️</div>
+      <div class="leg-content">
+        <div class="leg-title">Nigatsu-do Hall / 二月堂</div>
+        <div class="leg-notes">Walk up path behind Todai-ji. Elevated city view.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🛍️</div>
+      <div class="leg-content">
+        <div class="leg-title">Higashimuki Shopping Street / 東向商店街</div>
+        <div class="leg-notes">Covered shopping arcade in Nara city centre.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏠</div>
+      <div class="leg-content">
+        <div class="leg-title">Return to Airbnb + Nakazakicho evening stroll</div>
+        <div class="leg-notes">Evening stroll through Nakazakicho vintage neighbourhood near Airbnb.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 4: Mar 26 — USJ -->
+<div class="day-card">
+  <div class="day-header osaka">
+    <span>Wednesday, March 26 — Universal Studios Japan 🏯</span>
+    <span class="day-num">Day 4</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time">11:10</div>
+      <div class="leg-icon">🎢</div>
+      <div class="leg-content">
+        <div class="leg-title">Jujutsu Kaisen <span class="leg-type-badge">timed</span></div>
+        <div class="leg-notes">Timed entry per Brenda schedule.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time">13:40</div>
+      <div class="leg-icon">🎢</div>
+      <div class="leg-content">
+        <div class="leg-title">Hollywood Dream Ride <span class="leg-type-badge">timed</span></div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time">16:50</div>
+      <div class="leg-icon">🎢</div>
+      <div class="leg-content">
+        <div class="leg-title">Flight of Hippogriff <span class="leg-type-badge">timed</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 5: Mar 27 — Osaka exploring -->
+<div class="day-card">
+  <div class="day-header osaka">
+    <span>Thursday, March 27 — Osaka Exploring 🏯</span>
+    <span class="day-num">Day 5</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏙️</div>
+      <div class="leg-content">
+        <div class="leg-title">Umeda Sky Building / 梅田スカイビル</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🛍️</div>
+      <div class="leg-content">
+        <div class="leg-title">HANKYU SANBAN GAI / 阪急三番街</div>
+        <div class="leg-notes">Large shopping complex. Kiddyland inside.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">👓</div>
+      <div class="leg-content">
+        <div class="leg-title">Prescription Eyewear Stops (Brenda)</div>
+        <div class="leg-notes">Meganeichiba Umedachayamachiten · OWNDAYS Hankyu Sanbangai · JINS Hankyu-Umeda-Sambangai</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🌸</div>
+      <div class="leg-content">
+        <div class="leg-title">Kema Sakuranomiya Park / 毛馬桜之宮公園</div>
+        <div class="leg-notes">Osaka Loop Line 2 stops to Sakuranomiya. Sakura peak late March. Food stalls along river.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏯</div>
+      <div class="leg-content">
+        <div class="leg-title">Osaka Castle + Nishinomaru Garden / 大阪城 + 西の丸庭園</div>
+        <div class="leg-notes">Tanimachi Line 3 stops to Tanimachi 4-chome, 20 min walk. Nishinomaru for sakura.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🛍️</div>
+      <div class="leg-content">
+        <div class="leg-title">Shinsaibashi-suji Shopping Street / 心斎橋筋商店街</div>
+        <div class="leg-notes">Major covered shopping arcade.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏮</div>
+      <div class="leg-content">
+        <div class="leg-title">Dotonbori + Hozen-ji Temple / 道頓堀 + 法善寺</div>
+        <div class="leg-notes">Hozen-ji temple tucked in alley behind Dotonbori. Evening canal atmosphere.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🍽️</div>
+      <div class="leg-content">
+        <div class="leg-title">Saka Ichimonji Mitsuhide — dinner / 坂一文字光秀</div>
+        <div class="leg-notes">Dotonbori area. Brenda dinner pick.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 6: Mar 28 — Sakai + Osaka -->
+<div class="day-card">
+  <div class="day-header sakai">
+    <span>Friday, March 28 — Sakai Knives + Osaka South</span>
+    <span class="day-num">Day 6</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏛️</div>
+      <div class="leg-content">
+        <div class="leg-title">Sakai Traditional Crafts Museum / 堺伝統産業会館</div>
+        <div class="leg-notes">Hands-on craft experience.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🔪</div>
+      <div class="leg-content">
+        <div class="leg-title">Knife Shops</div>
+        <div class="leg-notes">Baba Hamono (forge on site) · De Sakai (working forge + retail) · Enami Cutlery Factory</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🎮</div>
+      <div class="leg-content">
+        <div class="leg-title">Nipponbashi Denden Town / 日本橋でんでんタウン</div>
+        <div class="leg-notes">Surugaya (retro games/anime). SenNichiMae Doguyasuji cookware street nearby.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🗼</div>
+      <div class="leg-content">
+        <div class="leg-title">Tsutenkaku Tower + Tower Knives / 通天閣</div>
+        <div class="leg-notes">Shinsekai neighbourhood. Tower Knives shop nearby.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🛍️</div>
+      <div class="leg-content">
+        <div class="leg-title">Orange Street / オレンジストリート</div>
+        <div class="leg-notes">Design, furniture, independent boutiques.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 7: Mar 29 — Kyoto -->
+<div class="day-card page-break">
+  <div class="day-header kyoto">
+    <span>Saturday, March 29 — Kyoto Day Trip 🏯</span>
+    <span class="day-num">Day 7</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time">08:00</div>
+      <div class="leg-icon">🚃</div>
+      <div class="leg-content">
+        <div class="leg-title">Osaka → Kyoto → Ginkakuji</div>
+        <div class="leg-notes">Train to Kyoto Station then Bus #100 or #5 to Ginkakuji-mae. 90 min total.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time">08:30</div>
+      <div class="leg-icon">🏛️</div>
+      <div class="leg-content">
+        <div class="leg-title">Ginkakuji (Silver Pavilion) / 銀閣寺</div>
+        <div class="leg-notes">Opens 8:30 AM. Arrive early. Dry sand garden.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🌸</div>
+      <div class="leg-content">
+        <div class="leg-title">Philosophers Path / 哲学の道</div>
+        <div class="leg-notes">35-45 min walk south along cherry tree-lined canal. Optional: Honen-in temple.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">⛩️</div>
+      <div class="leg-content">
+        <div class="leg-title">Nanzenji Temple / 南禅寺</div>
+        <div class="leg-notes">Via Eikando. Massive Sanmon gate and Meiji-period brick aqueduct.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">⛩️</div>
+      <div class="leg-content">
+        <div class="leg-title">Heian Shrine / 平安神宮</div>
+        <div class="leg-notes">10-15 min west from Nanzenji. Massive red torii. Stroll shrine gardens.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🌸</div>
+      <div class="leg-content">
+        <div class="leg-title">Maruyama Park + Yasaka Shrine / 円山公園 + 八坂神社</div>
+        <div class="leg-notes">Famous weeping cherry tree. Walk through park into Yasaka Shrine (center of Gion).</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏮</div>
+      <div class="leg-content">
+        <div class="leg-title">Higashiyama — Ninenzaka + Sannenzaka / 二年坂 + 三年坂</div>
+        <div class="leg-notes">Traditional stone streets with shops. Very crowded during sakura — go early or late afternoon.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏛️</div>
+      <div class="leg-content">
+        <div class="leg-title">Kiyomizudera Temple / 清水寺</div>
+        <div class="leg-notes">10-15 min uphill from Sannenzaka. Iconic wooden stage. Sunset views over Kyoto.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 8: Mar 30 — Transit + Kanazawa -->
+<div class="day-card">
+  <div class="day-header kanazawa">
+    <span>Sunday, March 30 — Osaka → Kanazawa 🌸</span>
+    <span class="day-num">Day 8</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🚃</div>
+      <div class="leg-content">
+        <div class="leg-title">Check out → Thunderbird to Kanazawa</div>
+        <div class="leg-notes">Osaka Umeda → Kanazawa (~2h30m). Thunderbird limited express.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏨</div>
+      <div class="leg-content">
+        <div class="leg-title">Hotel Sanraku Kanazawa — check in / ホテル山楽金沢</div>
+        <div class="leg-notes">Central location. Omicho Market 5 min, Higashi Chaya 10 min, Kenroku-en 15 min.</div>
+      </div>
+    </div>
+    <div class="flight-alert">⚠️ Confirm with Brenda: Hotel Sanraku vs Inova Hotel — which reservation is final?</div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🐟</div>
+      <div class="leg-content">
+        <div class="leg-title">Omicho Market / 近江町市場</div>
+        <div class="leg-notes">5 min walk from hotel. Fresh seafood, local produce. Afternoon arrival activity.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 9: Mar 31 — Kanazawa free day -->
+<div class="day-card">
+  <div class="day-header kanazawa">
+    <span>Monday, March 31 — Kanazawa Free Day 🌸</span>
+    <span class="day-num">Day 9</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">📅</div>
+      <div class="leg-content">
+        <div class="leg-title">Free day — no scheduled activities</div>
+        <div class="leg-notes">Suggested: Kenroku-en Garden, Higashi Chaya (geisha district), 21st Century Museum, Nagamachi samurai district, Kanazawa Castle. Ask Shogun for recommendations!</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 10: Apr 1 — Kanazawa → Tokyo -->
+<div class="day-card">
+  <div class="day-header tokyo">
+    <span>Tuesday, April 1 — Kanazawa → Tokyo 🗼</span>
+    <span class="day-num">Day 10</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🚄</div>
+      <div class="leg-content">
+        <div class="leg-title">Check out → Kagayaki Shinkansen to Tokyo</div>
+        <div class="leg-notes">Kanazawa → Tokyo (~2.5h). Brenda has train booking details.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏠</div>
+      <div class="leg-content">
+        <div class="leg-title">Sugamo Airbnb — check in / 巣鴨</div>
+        <div class="leg-notes">Yamanote + Mita lines. 1 stop to Ikebukuro. Jizo-dori shopping street 1 min walk.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 11: Apr 2 — Ueno -->
+<div class="day-card">
+  <div class="day-header tokyo">
+    <span>Wednesday, April 2 — Ueno + Ameyoko 🗼</span>
+    <span class="day-num">Day 11</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏛️</div>
+      <div class="leg-content">
+        <div class="leg-title">Tokyo National Museum + Ueno Park / 東京国立博物館 + 上野公園</div>
+        <div class="leg-notes">Largest art museum in Japan. Opens 9:30am, budget 2-3 hours. Closed Mondays. Ueno Park is prime sakura viewing.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🛍️</div>
+      <div class="leg-content">
+        <div class="leg-title">Ameyoko Market / アメ横</div>
+        <div class="leg-notes">5 min from museum. Street food, cheap snacks, some vintage goods.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 12: Apr 3 — Ghibli -->
+<div class="day-card">
+  <div class="day-header tokyo">
+    <span>Thursday, April 3 — Ghibli Museum 🗼</span>
+    <span class="day-num">Day 12</span>
+  </div>
+  <div class="day-body">
+    <div class="flight-alert">⚠️ TIMED ENTRY: 12:00 NOON — NO LATE ENTRY. Booking #7961560155. DEPART SUGAMO BY 10:45AM.</div>
+    <div class="leg">
+      <div class="leg-time">10:45</div>
+      <div class="leg-icon">🚃</div>
+      <div class="leg-content">
+        <div class="leg-title">Sugamo → Shinjuku → Mitaka</div>
+        <div class="leg-notes">Yamanote to Shinjuku → JR Chuo Line rapid to Mitaka → 10 min walk or shuttle bus (¥200). Allow 40 min.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time">12:00</div>
+      <div class="leg-icon">🎬</div>
+      <div class="leg-content">
+        <div class="leg-title">Ghibli Museum — Mitaka / 三鷹の森ジブリ美術館</div>
+        <div class="leg-notes">Timed entry NOON. Do not be late.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 13: Apr 4 — Sugamo -->
+<div class="day-card">
+  <div class="day-header tokyo">
+    <span>Friday, April 4 — Sugamo Neighbourhood 🗼</span>
+    <span class="day-num">Day 13</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">⛩️</div>
+      <div class="leg-content">
+        <div class="leg-title">Koganji Temple + Jizo-dori / 高岩寺 + 地蔵通り</div>
+        <div class="leg-notes">Togenuki Jizo — "Grandma Harajuku." Morning market on the 4th of each month. Japanese sweets, pharmacy finds, everyday Tokyo life.</div>
+      </div>
+    </div>
+    <div class="flight-alert">🗓️ April 4th = Monthly market day on Jizo-dori! Morning market will be active.</div>
+  </div>
+</div>
+
+<!-- DAY 14: Apr 5 — Shimokitazawa -->
+<div class="day-card">
+  <div class="day-header tokyo">
+    <span>Saturday, April 5 — Shimokitazawa Vintage 🗼</span>
+    <span class="day-num">Day 14</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🛍️</div>
+      <div class="leg-content">
+        <div class="leg-title">Shimokitazawa Vintage Shopping / 下北沢</div>
+        <div class="leg-notes">Tokyo's best vintage district. From Sugamo: Yamanote to Shinjuku → Odakyu to Shimokitazawa (~40 min). Shops: Chicago, New York Joe Exchange, Flamingo. Bear Pond coffee.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 15: Apr 6 — Harajuku + Shibuya -->
+<div class="day-card">
+  <div class="day-header tokyo">
+    <span>Sunday, April 6 — Harajuku + Shibuya Shopping Day 🗼</span>
+    <span class="day-num">Day 15</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🛍️</div>
+      <div class="leg-content">
+        <div class="leg-title">Harajuku / 原宿</div>
+        <div class="leg-notes">Takeshita-dori for youth fashion. Ura-Harajuku backstreets for boutiques.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">⛩️</div>
+      <div class="leg-content">
+        <div class="leg-title">Meiji Shrine / 明治神宮</div>
+        <div class="leg-notes">10 min walk from Harajuku station. Free admission.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🛍️</div>
+      <div class="leg-content">
+        <div class="leg-title">Omotesando / 表参道</div>
+        <div class="leg-notes">Flagship stores: Comme des Garcons, Issey Miyake, Uniqlo flagship.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">🏙️</div>
+      <div class="leg-content">
+        <div class="leg-title">Shibuya Crossing / 渋谷スクランブル交差点</div>
+        <div class="leg-notes">View from Starbucks 2nd floor or Shibuya Sky observation deck.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 16-17: Apr 7-8 — Free days -->
+<div class="day-card">
+  <div class="day-header tokyo">
+    <span>Monday–Tuesday, April 7–8 — Tokyo Free Days 🗼</span>
+    <span class="day-num">Days 16–17</span>
+  </div>
+  <div class="day-body">
+    <div class="leg">
+      <div class="leg-time"></div>
+      <div class="leg-icon">📅</div>
+      <div class="leg-content">
+        <div class="leg-title">Free days — no scheduled activities</div>
+        <div class="leg-notes">Suggested: Akihabara (tech/anime), Asakusa/Senso-ji, Tsukiji Outer Market, Yanaka/Nezu, Nakano Broadway, Ikebukuro. Ask Shogun!</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DAY 18: Apr 9 — Departure -->
+<div class="day-card">
+  <div class="day-header travel">
+    <span>Wednesday, April 9 — Departure Day</span>
+    <span class="day-num">Day 18</span>
+  </div>
+  <div class="day-body">
+    <div class="flight-alert">⚠️ DEPART SUGAMO BY 1:30PM — Allow 2.5 hours for international check-in.</div>
+    <div class="leg">
+      <div class="leg-time">13:30</div>
+      <div class="leg-icon">🚃</div>
+      <div class="leg-content">
+        <div class="leg-title">Sugamo → Haneda Airport</div>
+        <div class="leg-notes">Option A: Yamanote to Hamamatsucho → Tokyo Monorail to HND (20 min). Option B: Mita Line to Mita → Keikyu to HND.</div>
+      </div>
+    </div>
+    <div class="leg">
+      <div class="leg-time">16:25</div>
+      <div class="leg-icon">✈️</div>
+      <div class="leg-content">
+        <div class="leg-title">JL2 HND → SFO</div>
+        <div class="leg-notes">Japan Airlines direct. Departure 4:25 PM.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p style="text-align:center; color:#999; font-size:0.8rem; margin-top:2rem;">
+  Generated by Shogun AI Concierge · shogun.ibbytech.com · March 2026
+</p>
+
+</body>
+</html>

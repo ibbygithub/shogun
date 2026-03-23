@@ -14,5 +14,7 @@ services:
     env_file: .env
     ports:
       - "0.0.0.0:8082:8082"    # All interfaces — required for svcnode-01 telegram-gateway to reach this
+    volumes:
+      - /opt/logs/shogun/conversations:/var/log/shogun/conversations
     networks:
       - platform_net

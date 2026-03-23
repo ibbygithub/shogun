@@ -1,0 +1,26 @@
+{
+  "gateways": {
+    "google-places": {
+      "fqdn": "places.platform.ibbytech.com",
+      "internal_ip": "192.168.71.220",
+      "target_node": "svcnode-01",
+      "auth_type": "Bearer Token",
+      "secret_alias": "places_api_key"
+    },
+    "telegram-bot": {
+      "fqdn": "telegram.platform.ibbytech.com",
+      "internal_ip": "192.168.71.220",
+      "target_node": "svcnode-01",
+      "auth_type": "Bot Father Token",
+      "secret_alias": "tg_bot_token"
+    },
+    "LLM-gateway": {
+      "fqdn": "llm.platform.ibbytech.com",
+      "internal_ip": "192.168.71.220",
+      "target_node": "svcnode-01",
+      "auth_type": "API Key",
+      "secret_alias": "llm_gateway_key"
+    }
+  },
+  "network_rule": "If DNS resolution for *.platform fails, route via 192.168.71.220 (svcnode-01)."
+}

@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import time
 import uuid
@@ -14,6 +15,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 LLM_GATEWAY  = os.getenv("LLM_GATEWAY_URL", "http://platform-llm-gateway:8080")
 TAVILY_GW    = os.getenv("TAVILY_GATEWAY_URL", "http://platform-tavily:8084")
+PLACES_GW    = os.getenv("PLACES_GATEWAY_URL", "http://platform-places-google:8081")
 # Gemini REST API — used directly for function-calling requests (not available via gateway)
 GOOGLE_API_KEY   = os.getenv("GOOGLE_API_KEY", "")
 GOOGLE_BASE_URL  = os.getenv("GOOGLE_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
@@ -51,6 +53,37 @@ _CITY_COORDS: dict[str, tuple[float, float]] = {
     "kyoto":    (35.0116, 135.7681),
     "nara":     (34.6851, 135.8048),
 }
+
+# Precise coordinates for trip accommodation anchors — used by find_nearby_places
+_ANCHOR_COORDS: dict[str, tuple[float, float]] = {
+    "osaka-airbnb":    (34.7085, 135.5105),  # 大阪市北区浪花町10-12 (geocoded via GSI)
+    "nara-park":       (34.6850, 135.8305),  # Kintetsu Nara Station / Nara Park entrance
+    "usjapan":         (34.6654, 135.4321),  # Universal Studios Japan entrance
+    "kanazawa-hotel":  (36.5704, 136.6588),  # 石川県金沢市尾張町1-1-1 Hotel Sanraku (geocoded via GSI)
+    "tokyo-sugamo":    (35.7395, 139.7312),  # 東京都豊島区巣鴨4-37-6 (geocoded via GSI)
+    "ghibli-museum":   (35.6963, 139.5705),  # Ghibli Museum, Mitaka
+}
+
+# Human-readable labels for each anchor — used in direction link text
+_ANCHOR_LABELS: dict[str, str] = {
+    "osaka-airbnb":   "Osaka Airbnb (大阪市北区浪花町10-12)",
+    "nara-park":      "Nara Park",
+    "usjapan":        "Universal Studios Japan",
+    "kanazawa-hotel": "Hotel Sanraku, Kanazawa",
+    "tokyo-sugamo":   "Tokyo Airbnb (東京都豊島区巣鴨4-37-6)",
+    "ghibli-museum":  "Ghibli Museum, Mitaka",
+}
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return distance in metres between two lat/lng points."""
+    R = 6_371_000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
 
 # Keywords that trigger a Tavily search for current sakura / event data
 _SAKURA_KEYWORDS = {
@@ -155,20 +188,24 @@ CALENDAR_TOOLS = [
     },
     {
         "name": "toggle_checklist_item",
-        "description": "Mark a packing checklist item as packed or unpacked.",
+        "description": (
+            "Mark a packing checklist item as packed or unpacked. "
+            "Use when the user says 'mark X as packed', 'I packed X', 'check off X', "
+            "'unpack X', or similar. Pass the item name as a string — no lookup needed."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "item_id": {
-                    "type": "integer",
-                    "description": "The ID of the checklist item",
+                "item_name": {
+                    "type": "string",
+                    "description": "The name of the item to mark (e.g. 'passport', 'camera', 'adapter')",
                 },
                 "packed": {
                     "type": "boolean",
-                    "description": "True to mark as packed, False to unpack",
+                    "description": "True to mark as packed, False to mark as unpacked",
                 },
             },
-            "required": ["item_id", "packed"],
+            "required": ["item_name", "packed"],
         },
     },
     {
@@ -176,22 +213,33 @@ CALENDAR_TOOLS = [
         "description": (
             "Search the trip knowledge base for local recommendations, restaurants, shops, temples, "
             "and travel tips. Use this when the user asks about places to visit, where to eat, "
-            "shopping, or local knowledge."
+            "shopping, or local knowledge. Always call this FIRST before web_search for any "
+            "question about places, food, shopping, or activities during the trip."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query",
+                    "description": "Search query — use plain English, include district/neighborhood if known (e.g. 'craft beer bar Dotonbori Osaka')",
                 },
                 "city": {
                     "type": "string",
-                    "description": "Filter by city. Omit for all cities.",
+                    "description": "Filter by city: 'osaka', 'kyoto', 'nara', 'kanazawa', 'tokyo'. Omit to search all cities.",
+                },
+                "anchor": {
+                    "type": "string",
+                    "description": "Filter by accommodation anchor for proximity queries: 'osaka-airbnb', 'kanazawa-hotel', 'nara-park', 'tokyo-sugamo', 'ghibli-museum', 'usjapan'. Use when the user asks what is near their current accommodation.",
                 },
                 "category": {
                     "type": "string",
-                    "description": "Filter by category: restaurant, vintage, skincare, temple, street_food, museum, etc.",
+                    "description": (
+                        "Filter by category. Options: dining, coffee_cafe, craft_beer, shopping, "
+                        "anime_manga, tech_electronics, skincare, jewelry_artisan, eyewear_prescription, "
+                        "knife_shop, ceramics, shopping_crafts, sake_brewery, museum, temple, shrine, "
+                        "park, sightseeing, market, neighborhood, convenience_store, restaurant, "
+                        "vintage, street_food, practical, events, sakura. Omit to search all categories."
+                    ),
                 },
             },
             "required": ["query"],
@@ -300,6 +348,11 @@ CALENDAR_TOOLS = [
                     "type": "string",
                     "description": "City context to add to the search",
                 },
+                "include_domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Restrict search to specific domains. Use ['tabelog.com'] for Tabelog restaurant reviews and ratings.",
+                },
             },
             "required": ["query"],
         },
@@ -314,6 +367,51 @@ CALENDAR_TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {},
+        },
+    },
+    {
+        "name": "find_nearby_places",
+        "description": (
+            "Search Google Places for real businesses near a specific trip location. "
+            "Use this for ANY proximity query: nearest pharmacy, SIM card shop, "
+            "convenience store, restaurant within walking distance, ATM nearby, etc. "
+            "Returns real business names, addresses, ratings, and Google Maps links. "
+            "ALWAYS prefer this over web_search for 'near me', 'nearby', 'walking distance', "
+            "'closest', or 'within X minutes' queries. "
+            "Anchor names: 'osaka-airbnb' (Airbnb at 大阪市北区浪花町10-12), 'nara-park', "
+            "'usjapan' (Universal Studios Japan), 'kanazawa-hotel' (Hotel Sanraku at 金沢市尾張町1-1-1), "
+            "'tokyo-sugamo' (Airbnb at 東京都豊島区巣鴨4-37-6), 'ghibli-museum' (Mitaka). "
+            "Default anchor is the current trip accommodation."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "What to search for in natural language: 'SIM card shop', "
+                        "'pharmacy', 'ramen restaurant', 'convenience store', 'ATM', "
+                        "'drugstore', 'supermarket', etc."
+                    ),
+                },
+                "anchor": {
+                    "type": "string",
+                    "description": (
+                        "Trip location anchor. One of: 'osaka-airbnb', 'nara-park', "
+                        "'usjapan', 'kanazawa-hotel', 'tokyo-sugamo', 'ghibli-museum'. "
+                        "Omit to use the current city's accommodation."
+                    ),
+                },
+                "radius_m": {
+                    "type": "integer",
+                    "description": (
+                        "Search radius in meters. "
+                        "500 = ~5 min walk, 1000 = ~10 min walk, 1500 = ~15 min walk. "
+                        "Default 800."
+                    ),
+                },
+            },
+            "required": ["query"],
         },
     },
 ]
@@ -480,13 +578,13 @@ def _exec_get_checklist_items(args: dict) -> str:
 
 
 def _exec_toggle_checklist_item(args: dict) -> str:
-    """Toggle packed status on a checklist_items row."""
+    """Toggle packed status by item name (ILIKE match)."""
     try:
-        item_id = args.get("item_id")
+        item_name = (args.get("item_name") or "").strip()
         packed = args.get("packed")
 
-        if item_id is None:
-            return "Error: item_id is required."
+        if not item_name:
+            return "Error: item_name is required."
         if packed is None:
             return "Error: packed (true/false) is required."
 
@@ -496,14 +594,17 @@ def _exec_toggle_checklist_item(args: dict) -> str:
                     """
                     UPDATE checklist_items
                     SET packed = %s
-                    WHERE id = %s
+                    WHERE item_name ILIKE %s
                     RETURNING id, item_name, packed
                     """,
-                    (bool(packed), item_id),
+                    (bool(packed), f"%{item_name}%"),
                 )
                 row = cur.fetchone()
                 if not row:
-                    return f"Error: no checklist item found with ID {item_id}."
+                    return (
+                        f"No checklist item matching '{item_name}' found. "
+                        f"Call get_checklist_items to see available items."
+                    )
 
         status = "packed" if row[2] else "unpacked"
         return f"'{row[1]}' is now marked as {status}."
@@ -512,31 +613,84 @@ def _exec_toggle_checklist_item(args: dict) -> str:
 
 
 def _exec_search_trip_knowledge(args: dict) -> str:
-    """Search knowledge_items using ILIKE on topic and content_summary."""
+    """Search knowledge_items using OR-match + count-based relevance ranking.
+
+    Design:
+    - Tokens shorter than 3 chars and common English stopwords are filtered out
+      so words like "near", "the", "see", "for" don't dilute matching.
+    - Remaining tokens use OR logic: a row matches if ANY meaningful token
+      appears in topic or content_summary.
+    - Relevance ordered by: full phrase in topic > token match count > topic alpha.
+    - Structural filters (city, anchor, category) narrow the result set first.
+    """
+    # Common navigational/stopwords that don't appear in knowledge content
+    _STOPWORDS = {
+        "near", "the", "and", "for", "are", "our", "what", "see", "find",
+        "best", "good", "some", "any", "not", "can", "get", "how", "do",
+        "to", "in", "at", "of", "a", "an", "is", "it", "be", "or", "we",
+        "i", "me", "my", "us", "you", "he", "she", "they", "that", "this",
+        "with", "from", "have", "will", "was", "has", "had", "but", "if",
+        "looking", "want", "need", "going", "try",
+    }
     try:
         query = args.get("query", "").strip()
         city = args.get("city")
+        anchor = args.get("anchor")
         category = args.get("category")
 
         if not query:
             return "Error: query is required."
 
-        clauses: list[str] = []
-        params: list = []
+        # Build meaningful token list: drop short words and stopwords
+        raw_tokens = query.lower().split()
+        tokens = [
+            t for t in raw_tokens
+            if len(t) >= 3 and t not in _STOPWORDS
+        ]
+        # Fallback: if all tokens were filtered, use the full query as one token
+        if not tokens:
+            tokens = [query]
 
-        # Full-text-style ILIKE across topic and content_summary
-        clauses.append("(topic ILIKE %s OR content_summary ILIKE %s)")
-        like_term = f"%{query}%"
-        params.extend([like_term, like_term])
+        # Structural filters: city, anchor, category
+        struct_clauses: list[str] = []
+        struct_params: list = []
 
         if city:
-            clauses.append("(city = %s OR city IS NULL)")
-            params.append(city.lower())
+            struct_clauses.append("(LOWER(city) = LOWER(%s) OR city IS NULL)")
+            struct_params.append(city)
+        if anchor:
+            struct_clauses.append("anchor = %s")
+            struct_params.append(anchor)
         if category:
-            clauses.append("category = %s")
-            params.append(category.lower())
+            struct_clauses.append("LOWER(category) = LOWER(%s)")
+            struct_params.append(category)
 
-        where = "WHERE " + " AND ".join(clauses)
+        # Text match: OR across all meaningful tokens (any hit = candidate row)
+        token_match_parts = []
+        token_params: list = []
+        for token in tokens:
+            like = f"%{token}%"
+            token_match_parts.append("(topic ILIKE %s OR content_summary ILIKE %s)")
+            token_params.extend([like, like])
+        token_clause = "(" + " OR ".join(token_match_parts) + ")"
+
+        all_clauses = struct_clauses + [token_clause]
+        where = "WHERE " + " AND ".join(all_clauses)
+        all_params = struct_params + token_params
+
+        # Relevance scoring expression: count how many tokens match the row.
+        # Built as a sum of CASE expressions, one per token.
+        score_parts = []
+        score_params: list = []
+        for token in tokens:
+            like = f"%{token}%"
+            score_parts.append(
+                "(CASE WHEN topic ILIKE %s OR content_summary ILIKE %s THEN 1 ELSE 0 END)"
+            )
+            score_params.extend([like, like])
+        match_score = " + ".join(score_parts) if score_parts else "1"
+
+        full_like = f"%{query}%"
 
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -545,10 +699,14 @@ def _exec_search_trip_knowledge(args: dict) -> str:
                     SELECT id, city, category, topic, content_summary
                     FROM knowledge_items
                     {where}
-                    ORDER BY city NULLS LAST, topic
-                    LIMIT 5
+                    ORDER BY
+                        CASE WHEN topic ILIKE %s THEN 0 ELSE 1 END,
+                        ({match_score}) DESC,
+                        city NULLS LAST,
+                        topic
+                    LIMIT 15
                     """,
-                    params,
+                    all_params + score_params + [full_like],
                 )
                 rows = cur.fetchall()
 
@@ -702,11 +860,14 @@ def _exec_web_search(args: dict) -> str:
         if city and city.lower() not in query.lower():
             search_query = f"{query} {city} Japan"
 
+        include_domains = args.get("include_domains", [])
         payload = {
             "query": search_query,
             "max_results": 5,
             "search_depth": "basic",
         }
+        if include_domains:
+            payload["include_domains"] = include_domains
         resp = httpx.post(f"{TAVILY_GW}/v1/search", json=payload, timeout=15.0)
         resp.raise_for_status()
         data = resp.json()
@@ -745,7 +906,8 @@ def _exec_web_search(args: dict) -> str:
         # Format results and auto-save to knowledge_items
         lines = []
         saved_count = 0
-        city_val = city.lower() if city else None
+        # Fall back to current trip city so results always save even when AI omits city param
+        city_val = city.lower() if city else _current_city()
 
         for r in results:
             title = r.get("title", "")
@@ -859,6 +1021,218 @@ def _exec_get_trip_overview(args: dict) -> str:
         return f"Error generating trip overview: {e}"
 
 
+def _exec_find_nearby_places(args: dict) -> str:
+    """Search Google Places for businesses near a trip anchor location."""
+    try:
+        query = args.get("query", "").strip()
+        anchor = args.get("anchor", "").strip().lower()
+        radius_m = int(args.get("radius_m") or 800)
+
+        if not query:
+            return "Error: query is required."
+
+        # Resolve anchor → coordinates. Fall back to current city.
+        if anchor and anchor in _ANCHOR_COORDS:
+            lat, lng = _ANCHOR_COORDS[anchor]
+            location_label = anchor
+        else:
+            # Derive current city from today's date
+            today = date.today().isoformat()
+            current_city = "osaka"
+            for start, end, city in _CITY_SCHEDULE:
+                if start <= today <= end:
+                    current_city = city
+                    break
+            # Default anchor per city
+            city_anchor_defaults = {
+                "osaka": "osaka-airbnb",
+                "kanazawa": "kanazawa-hotel",
+                "tokyo": "tokyo-sugamo",
+                "nara": "nara-park",
+            }
+            default_anchor = city_anchor_defaults.get(current_city, "osaka-airbnb")
+            lat, lng = _ANCHOR_COORDS.get(default_anchor, _CITY_COORDS.get(current_city, (34.6937, 135.5023)))
+            location_label = default_anchor
+
+        resp = httpx.post(
+            f"{PLACES_GW}/v1/places/search_text",
+            json={
+                "text_query": f"{query} Japan",
+                "lat": lat,
+                "lng": lng,
+                "radius_m": radius_m,
+                "max_results": 8,
+                "language_code": "en",
+                "region_code": "JP",
+            },
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data.get("ok"):
+            return f"Places search failed: {data.get('error', 'unknown error')}"
+
+        raw_places = (data.get("data") or {}).get("places") or []
+        if not raw_places:
+            return (
+                f"No Google Places results for '{query}' within {radius_m}m of {anchor_label}. "
+                f"Try increasing the radius or use web_search for broader results."
+            )
+
+        # Calculate real distance for all results and sort closest-first.
+        # locationBias is a soft hint so results outside the requested radius can appear —
+        # we label them as beyond-range rather than silently removing them.
+        places_with_dist = []
+        for p in raw_places:
+            loc = p.get("location") or {}
+            place_lat = loc.get("latitude")
+            place_lng = loc.get("longitude")
+            if place_lat and place_lng:
+                dist_m = round(_haversine_m(lat, lng, place_lat, place_lng))
+            else:
+                dist_m = None
+            places_with_dist.append((dist_m if dist_m is not None else 9999999, place_lat, place_lng, p, dist_m))
+        places_with_dist.sort(key=lambda x: x[0])
+
+        # Infer city and category for knowledge_items storage
+        anchor_city_map = {
+            "osaka-airbnb": "osaka", "nara-park": "nara", "usjapan": "osaka",
+            "kanazawa-hotel": "kanazawa", "tokyo-sugamo": "tokyo", "ghibli-museum": "tokyo",
+        }
+        place_city = anchor_city_map.get(location_label, _current_city())
+        query_lower = query.lower()
+        place_category = "practical"
+        cat_keywords = {
+            "restaurant": ["restaurant", "ramen", "sushi", "food", "eat", "dinner", "lunch",
+                           "breakfast", "cafe", "burger", "tonkatsu", "okonomiyaki", "takoyaki",
+                           "izakaya", "kaiseki", "yakitori", "udon", "soba", "tempura", "curry"],
+            "shopping": ["shop", "shopping", "store", "vintage", "clothing", "souvenir",
+                         "market", "mall", "anime", "manga", "knife", "pottery", "craft",
+                         "electronics", "camera", "sim", "phone"],
+            "temple": ["temple", "shrine", "garden", "park", "castle"],
+            "museum": ["museum", "gallery", "art", "exhibition"],
+            "skincare": ["skincare", "beauty", "cosmetics"],
+        }
+        for cat, keywords in cat_keywords.items():
+            if any(kw in query_lower for kw in keywords):
+                place_category = cat
+                break
+
+        anchor_short = anchor_label.split(" (")[0]  # e.g. "Osaka Airbnb"
+        walk_limit = radius_m // 80  # requested walk time in minutes
+
+        # Build Gemini context (plain text) and pre-formatted block (verbatim output).
+        # Gemini context includes the direction URLs so follow-up questions about directions
+        # can be answered without re-calling the tool.
+        gemini_lines = [
+            f"Google Places: {len(places_with_dist)} result(s) for '{query}' near {anchor_label}. "
+            f"Requested radius: {radius_m}m (~{walk_limit} min walk). "
+            f"Results sorted by distance. Some may exceed the requested radius — their distance is shown.\n"
+            f"Walking direction links (from anchor and from current GPS) are included per place.\n"
+            f"Pre-formatted place cards are appended to your response — do NOT restate or reformat them.\n"
+        ]
+        formatted_lines = [f"**{query.title()} near {anchor_short}**\n"]
+
+        saved_count = 0
+        for i, (_sort_dist, place_lat, place_lng, p, dist_m) in enumerate(places_with_dist, 1):
+            name = (p.get("displayName") or {}).get("text", "Unknown")
+            address = p.get("formattedAddress", "No address")
+            rating = p.get("rating")
+            rating_count = p.get("userRatingCount", 0)
+            maps_uri = p.get("googleMapsUri", "")
+
+            if dist_m is not None:
+                walk_min = max(1, round(dist_m / 80))
+                dist_label = f"{dist_m}m (~{walk_min} min walk)"
+                if dist_m > radius_m:
+                    dist_label += f" — beyond {radius_m}m request"
+            else:
+                dist_label = "distance unknown"
+                walk_min = None
+
+            rating_str = f" — ★{rating} ({rating_count} reviews)" if rating else ""
+
+            if place_lat and place_lng:
+                dir_from_anchor = (
+                    f"https://www.google.com/maps/dir/?api=1"
+                    f"&origin={lat},{lng}"
+                    f"&destination={place_lat},{place_lng}"
+                    f"&travelmode=walking"
+                )
+                dir_from_here = (
+                    f"https://www.google.com/maps/dir/?api=1"
+                    f"&destination={place_lat},{place_lng}"
+                    f"&travelmode=walking"
+                )
+            else:
+                dir_from_anchor = ""
+                dir_from_here = ""
+
+            # Gemini context — includes URLs so follow-up direction questions don't need tool re-call
+            gemini_lines.append(
+                f"{i}. {name} — {dist_label} — {address[:60]}"
+                + (f"\n   Walk from {anchor_short}: {dir_from_anchor}" if dir_from_anchor else "")
+                + (f"\n   From current location: {dir_from_here}" if dir_from_here else "")
+            )
+
+            # Pre-formatted card (appended verbatim to final response)
+            card = f"**{i}. {name}**{rating_str}\n   {address}\n   {dist_label}\n"
+            if maps_uri:
+                card += f"   [View on map]({maps_uri})"
+            if dir_from_anchor:
+                card += f" | [Walk from {anchor_short}]({dir_from_anchor})"
+            if dir_from_here:
+                card += f" | [Navigate from my location]({dir_from_here})"
+            card += "\n"
+            formatted_lines.append(card)
+
+            # Auto-save to knowledge_items
+            try:
+                rating_info = f" | Rating: {rating} ({rating_count} reviews)" if rating else ""
+                summary = f"Address: {address} | {dist_m}m (~{walk_min} min walk){rating_info} | Near: {anchor_label}"
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        if maps_uri:
+                            cur.execute(
+                                "SELECT 1 FROM knowledge_items WHERE source_url = %s",
+                                (maps_uri,),
+                            )
+                            if cur.fetchone():
+                                continue
+                        cur.execute(
+                            """
+                            INSERT INTO knowledge_items
+                              (city, category, topic, content_summary, source_url)
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (place_city, place_category, name[:200], summary[:500],
+                             maps_uri[:500] if maps_uri else None),
+                        )
+                saved_count += 1
+            except Exception:
+                pass
+
+        if saved_count:
+            formatted_lines.append(f"*{saved_count}/{len(places_with_dist)} places saved to local knowledge base.*")
+
+        gemini_context = "\n".join(gemini_lines)
+        formatted_block = "\n".join(formatted_lines)
+
+        # Return context + marked block. _run_chat_with_tools strips the block before
+        # passing to Gemini and appends it verbatim to the final response.
+        return (
+            gemini_context
+            + "\n##FORMATTED_BLOCK_START##\n"
+            + formatted_block
+            + "\n##FORMATTED_BLOCK_END##"
+        )
+    except httpx.HTTPError as e:
+        return f"Places gateway error: {e}. Fall back to web_search for this query."
+    except Exception as e:
+        return f"Error finding nearby places: {e}"
+
+
 # Dispatch table — maps tool name → executor function
 _TOOL_EXECUTORS = {
     "get_itinerary_legs":    _exec_get_itinerary_legs,
@@ -871,6 +1245,7 @@ _TOOL_EXECUTORS = {
     "delete_itinerary_leg":  _exec_delete_itinerary_leg,
     "web_search":            _exec_web_search,
     "get_trip_overview":     _exec_get_trip_overview,
+    "find_nearby_places":    _exec_find_nearby_places,
 }
 
 
@@ -984,8 +1359,12 @@ def _run_chat_with_tools(
         contents = [{"role": "user", "parts": [{"text": user_message}]}]
 
     tool_actions: list[dict] = []
+    formatted_blocks: list[str] = []  # Pre-formatted content that bypasses Gemini synthesis
     MAX_TOOL_ROUNDS = 5
     seen_calls: set[str] = set()  # dedup: prevent identical tool+args from running twice
+
+    _BLOCK_START = "##FORMATTED_BLOCK_START##"
+    _BLOCK_END   = "##FORMATTED_BLOCK_END##"
 
     for _round in range(MAX_TOOL_ROUNDS):
         raw = _call_gemini_with_tools(contents, system_prompt, CALENDAR_TOOLS)
@@ -993,7 +1372,10 @@ def _run_chat_with_tools(
 
         if not function_calls:
             # Model returned a plain text response — we're done
-            return _extract_gemini_text(raw), tool_actions
+            reply = _extract_gemini_text(raw)
+            if formatted_blocks:
+                reply = reply.rstrip() + "\n\n" + "\n\n".join(formatted_blocks)
+            return reply, tool_actions
 
         # Deduplicate: skip any call with identical tool+args to a previous round
         deduped: list[dict] = []
@@ -1018,6 +1400,16 @@ def _run_chat_with_tools(
             else:
                 result_text = f"Error: unknown tool '{tool_name}'"
 
+            # Extract any pre-formatted block from the tool result.
+            # The block is stored for verbatim append; Gemini only sees the context summary.
+            gemini_text = result_text
+            if _BLOCK_START in result_text and _BLOCK_END in result_text:
+                bs = result_text.index(_BLOCK_START)
+                be = result_text.index(_BLOCK_END)
+                block_content = result_text[bs + len(_BLOCK_START):be].strip()
+                formatted_blocks.append(block_content)
+                gemini_text = result_text[:bs].strip()
+
             tool_actions.append({
                 "tool": tool_name,
                 "summary": _tool_action_summary(tool_name, tool_args, result_text),
@@ -1025,7 +1417,7 @@ def _run_chat_with_tools(
             tool_result_parts.append({
                 "functionResponse": {
                     "name": tool_name,
-                    "response": {"result": result_text},
+                    "response": {"result": gemini_text},
                 }
             })
 
@@ -1039,7 +1431,10 @@ def _run_chat_with_tools(
     # Safety exit: if we hit MAX_TOOL_ROUNDS without a text response,
     # do a final call with toolConfig set to TEXT_ONLY to force a response
     raw = _call_gemini_with_tools(contents, system_prompt, tools=[])
-    return _extract_gemini_text(raw), tool_actions
+    reply = _extract_gemini_text(raw)
+    if formatted_blocks:
+        reply = reply.rstrip() + "\n\n" + "\n\n".join(formatted_blocks)
+    return reply, tool_actions
 
 
 def _tool_action_summary(tool_name: str, args: dict, result: str) -> str:
@@ -1105,6 +1500,17 @@ def _tool_action_summary(tool_name: str, args: dict, result: str) -> str:
 
     if tool_name == "get_trip_overview":
         return "Read trip overview"
+
+    if tool_name == "find_nearby_places":
+        query = args.get("query", "?")
+        anchor = args.get("anchor") or "current accommodation"
+        radius_m = args.get("radius_m") or 800
+        # Count numbered place cards in the tool output (format: "1. Name", "2. Name", ...)
+        import re as _re
+        result_count = len(_re.findall(r"^\d+\. ", result or "", _re.MULTILINE))
+        saved = "saved to local knowledge base" in (result or "")
+        save_str = " — saved to DB" if saved else ""
+        return f"Google Places: '{query}' near {anchor} ({radius_m}m) → {result_count} results{save_str}"
 
     return f"Called tool: {tool_name}"
 
@@ -1318,12 +1724,17 @@ Three travelers: Todd (dad, tech/food/culture), Brenda (mom, shopping/skincare/t
 RULES — ALWAYS FOLLOW:
 
 1. SEARCH PROTOCOL — MANDATORY ORDER, NO EXCEPTIONS:
-   Step 1: Call search_trip_knowledge FIRST — always, for any place/food/activity query.
-   Step 2: If search_trip_knowledge returns results → answer from those. STOP. Do not call web_search.
-   Step 3: If search_trip_knowledge returns nothing → call web_search. Never skip Step 1.
-   Step 4: Use web_search results to answer — they are auto-saved for future queries.
-   Step 5: If BOTH return empty → use your Japan expertise: name specific places, give
-           practical details, never say "I'm having trouble" or "I cannot find".
+   Proximity queries ("nearby", "closest", "walking distance", "within X minutes"):
+     Step 1: Call find_nearby_places — returns real businesses with addresses and ratings.
+     Step 2: Supplement with search_trip_knowledge if more context needed.
+     Step 3: If find_nearby_places fails → fall back to web_search.
+
+   General place/food/activity queries (not proximity-based):
+     Step 1: Call search_trip_knowledge FIRST — always.
+     Step 2: If search_trip_knowledge returns results → answer from those. STOP.
+     Step 3: If search_trip_knowledge returns nothing → call web_search.
+     Step 4: If BOTH return empty → use your Japan expertise: name specific places, give
+             practical details, never say "I'm having trouble" or "I cannot find".
 
 2. LOCATION CONTEXT — Maintain location awareness across messages.
    If the user asks "where can I find X near the National Museum" and then asks "how about Y?",
@@ -1391,16 +1802,40 @@ CURRENT CONTEXT:
   Current city: {city.title()}{weather_line}{today_itin}{poi_block}{context_block}
 
 TOOLS AVAILABLE:
-  You have 10 tools. Use them proactively — don't guess when you can look up data.
+  You have 11 tools. Use them proactively — don't guess when you can look up data.
   - get_itinerary_legs: read the trip calendar
   - update_itinerary_leg: modify an existing leg (notes, title, date, description, address)
   - create_itinerary_leg: add a new activity to the calendar
   - delete_itinerary_leg: remove a leg (always confirm first)
   - get_trip_overview: see which days are busy/free
+  - find_nearby_places: Google Places — real businesses with addresses near trip locations.
+    USE THIS for: "nearby", "closest", "walking distance", "within X minutes", "near my airbnb/hotel".
+    Returns real names, addresses, ratings, and a Google Maps link per place.
   - search_trip_knowledge: search the local knowledge base
   - web_search: search the web for current info (auto-saves results)
   - get_checklist_items / toggle_checklist_item: packing list management
-  - get_trip_pois: browse points of interest by city"""
+  - get_trip_pois: browse points of interest by city
+
+10. LINKS AND MAPS — RULES YOU MUST FOLLOW:
+   a) NEVER construct Google Maps direction URLs yourself. Direction links always come from
+      the find_nearby_places tool. If the user asks for directions to a place, call
+      find_nearby_places — the tool returns pre-built walking direction links with the
+      correct starting coordinates. Manually constructed URLs use wrong coordinates.
+   b) For place view links (not directions), use the googleMapsUri from find_nearby_places results.
+   c) Deliver all links in the same response — never say "I will provide the links shortly."
+   d) NEVER say "I am under development", "I am still learning", or "I apologize for my
+      limitations." You are a fully deployed travel concierge. If you make an error, say
+      "Let me fix that" and correct it. No self-deprecating disclaimers.
+   e) When referencing the Osaka Airbnb, always say "大阪市北区浪花町10-12" — never describe
+      it as "near Tenjinbashisuji Station" or any other station. The accommodation address
+      is in the ACCOMMODATIONS section above and must be used exactly as written.
+
+TABELOG RESTAURANT REVIEWS — YOU CAN AND SHOULD PROVIDE THESE:
+  When the user asks about restaurant reviews, ratings, or wants Tabelog links/info:
+  Call web_search with include_domains=["tabelog.com"] and the restaurant name + city.
+  The search will return real Tabelog pages with ratings and URLs. Share the links.
+  Example: web_search(query="Afuri Ramen Ebisu Tokyo", include_domains=["tabelog.com"])
+  You are NOT limited in this. You can always search Tabelog for any restaurant."""
 
 
 # ---------------------------------------------------------------------------
@@ -1761,11 +2196,13 @@ def chat(body: ChatMessage, request: Request, user: User = Depends(get_current_u
         "content": body.message,
         "timestamp": history[-1]["timestamp"],
     }
-    history.append({
+    assistant_entry: dict = {
         "role": "assistant",
         "content": response_text,
         "timestamp": time.time(),
-    })
+        "tool_actions": tool_actions,  # always store, even [] — frontend uses this to show "no tools" badge
+    }
+    history.append(assistant_entry)
     _save_history(user.id, history)
 
     return {
@@ -1796,10 +2233,13 @@ def _fallback_llm_call(system_prompt: str, history: list[dict]) -> str:
 @router.get("/history")
 def get_history(request: Request, user: User = Depends(get_current_user)):
     history = _load_history(user.id)
-    return [
-        {"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")}
-        for h in history
-    ]
+    result = []
+    for h in history:
+        entry: dict = {"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")}
+        if "tool_actions" in h:  # include even when empty list — lets frontend show "no tools" badge
+            entry["tool_actions"] = h["tool_actions"]
+        result.append(entry)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1859,10 +2299,13 @@ def activate_conversation(conv_id: str, request: Request, user: User = Depends(g
     cache.setex(_current_conv_key(user.id), CONV_LIST_TTL, conv_id)
     raw = cache.get(_conv_msg_key(user.id, conv_id))
     history = json.loads(raw) if raw else []
-    return {
-        "id": conv_id,
-        "messages": [{"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")} for h in history]
-    }
+    messages = []
+    for h in history:
+        entry: dict = {"role": h["role"], "content": h["content"], "timestamp": h.get("timestamp")}
+        if "tool_actions" in h:
+            entry["tool_actions"] = h["tool_actions"]
+        messages.append(entry)
+    return {"id": conv_id, "messages": messages}
 
 
 @router.delete("/history")

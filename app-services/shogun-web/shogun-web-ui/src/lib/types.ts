@@ -11,6 +11,7 @@ export interface ItineraryLeg {
   confirmation_number: string | null;
   notes: string | null;
   status: string | null;
+  trip_poi_id?: number | null;
 }
 
 export interface Poi {
@@ -149,4 +150,29 @@ export interface BudgetItem {
   description: string;
   amount_jpy: number;
   created_utc: string;
+}
+
+export interface PoiGuide {
+  poi_type: string;
+  overview: string | null;
+  why_go: string | null;
+  whats_there: string | null;
+  hours_info: string | null;
+  admission_info: string | null;
+  time_estimate: string | null;
+  transit_info: string | null;
+  tips: string | null;
+  trip_context: string | null;
+  photos: Array<{ url?: string; name?: string; attribution?: string; source: string }>;
+  official_url: string | null;
+  sources: Array<{ url: string; title: string }>;
+  hours_verified: boolean;
+  completeness: string;
+  generated_utc: string | null;
+}
+
+export interface PoiGuideResponse {
+  poi: Poi;
+  has_guide: boolean;
+  guide: PoiGuide | null;
 }
